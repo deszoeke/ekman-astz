@@ -71,6 +71,9 @@ datavar(ds) = first(k for k in keys(ds) if ndims(ds[k]) == 3)
 "the time coordinate variable name in a file (sst uses valid_time, others use time)"
 timevar(ds) = haskey(ds, "valid_time") ? "valid_time" : "time"
 
+"sorted indices as a UnitRange when contiguous (fast NetCDF hyperslab read), else left as-is"
+asrange(idx) = !isempty(idx) && idx == first(idx):last(idx) ? (first(idx):last(idx)) : idx
+
 "average hourly data to daily (lon x lat) for time indices it, applying f to each hour; missing -> NaN"
 function dailymean(v, it, f=identity)
     x = f.(Float64.(coalesce.(v[:,:,it], NaN)))
@@ -149,19 +152,19 @@ function gradient(φ, lon, lat; periodic=isglobal(lon))
     nx, ny = size(φ, 1), size(φ, 2)
     dφdx = fill(NaN, size(φ))
     dφdy = fill(NaN, size(φ))
+    # precompute per-i, per-j quantities that don't depend on the other index or on k
+    dλ = [deg2rad(mod(lon[mod1(i+1, nx)] - lon[mod1(i-1, nx)], 360)) for i in 1:nx]
+    c  = cosd.(lat)
+    ady = [1 < j < ny ? a*deg2rad(lat[j+1] - lat[j-1]) : NaN for j in 1:ny]
     for k in CartesianIndices(size(φ)[3:end]), j in 1:ny, i in 1:nx
         # zonal
-        if periodic || 1 < i < nx
+        if (periodic || 1 < i < nx) && c[j] > 1e-10
             ip, im = mod1(i+1, nx), mod1(i-1, nx)
-            dλ = deg2rad(mod(lon[ip] - lon[im], 360))
-            c = cosd(lat[j])
-            if c > 1e-10
-                dφdx[i,j,k] = (φ[ip,j,k] - φ[im,j,k]) / (a*c*dλ)
-            end
+            dφdx[i,j,k] = (φ[ip,j,k] - φ[im,j,k]) / (a*c[j]*dλ[i])
         end
         # meridional
         if 1 < j < ny
-            dφdy[i,j,k] = (φ[i,j+1,k] - φ[i,j-1,k]) / (a*deg2rad(lat[j+1] - lat[j-1]))
+            dφdy[i,j,k] = (φ[i,j+1,k] - φ[i,j-1,k]) / ady[j]
         end
     end
     dφdx, dφdy
@@ -224,7 +227,7 @@ for m in months[1:3] # short test run
         haskey(phaselookup, d) || continue # no BSISO index for this day
         # look up BSISO phase index by day
         p = phaselookup[d]
-        it = Dict(k => findall(==(d), daystamp[k]) for k in keys(era5code))
+        it = Dict(k => asrange(findall(==(d), daystamp[k])) for k in keys(era5code))
         if any(isempty, values(it))
             @warn "missing hours on $d"
             continue
