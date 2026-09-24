@@ -1,4 +1,4 @@
-# Ekman transport of heat (enthalpy) in the ocean and atmosphere
+# Ekman transport of heat in the ocean and atmosphere
 
 ## Summary
 
