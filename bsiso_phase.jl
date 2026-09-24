@@ -41,13 +41,16 @@ phaselookup = Dict(zip(dt, ph1))
 # ERA5 hourly surface analysis from NCAR RDA d633000, one file per variable per month:
 #   <dir>/201201/e5.oper.an.sfc.128_229_iews.ll025sc.2012010100_2012013123.nc
 rdadir  = "d633000/e5.oper.an.sfc" # adjust to local copy
-ceoasdir = "/storage/ceoas-datasets/datasets/ERA5/staging/andrea/1hr/SFC"
+# ceoasdir = "/storage/ceoas-datasets/datasets/ERA5/staging/andrea/1hr/SFC"
+ceoasdir = "./data"
 # ECMWF parameter codes: iews, inss (N/m^2), sstk, 2t, 2d (K)
 era5code = (taux="128_229_iews", tauy="128_230_inss", sst="128_034_sstk",
             t2="128_167_2t", d2="128_168_2d")
 # directory holding the YYYYMM subdirectories for each variable
-era5dir = (taux=rdadir, tauy=rdadir, sst=joinpath(ceoasdir, "sst"),
+era5dir = (taux=joinpath(ceoasdir, "stress"), tauy=joinpath(ceoasdir, "stress"), 
+           sst=joinpath(ceoasdir, "sst"),
            t2=joinpath(ceoasdir, "t2m"), d2=joinpath(ceoasdir, "d2m"))
+# SST files are grouped by month directly in the directory data/sst/
 
 "ERA5 RDA file in directory dir for parameter code in the month containing date d"
 function era5file(dir, code, d)
@@ -55,7 +58,11 @@ function era5file(dir, code, d)
     m1 = lastdayofmonth(d)
     ym = Dates.format(m0, "yyyymm")
     span = Dates.format(m0, "yyyymmdd") * "00_" * Dates.format(m1, "yyyymmdd") * "23"
-    joinpath(dir, ym, "e5.oper.an.sfc.$(code).ll025sc.$(span).nc")
+    if code=="sst"
+	joinpath(dir, "ERA5_SFC_$(code)_$(ym)_r1440x721_hr.nc")
+    else
+    	joinpath(dir, ym, "e5.oper.an.sfc.$(code).ll025sc.$(span).nc")
+    end
 end
 
 "the data variable in an RDA file (the only variable with 3 dimensions)"
@@ -199,7 +206,8 @@ comp = Dict(k => zeros(nx, ny, 8) for k in (fieldkeys..., nlkeys...))
 nday = zeros(Int, 8)
 
 # loop over days for 2012-2026, opening each month's files once
-for m in months
+# for m in months
+for m in months[1:3] # short test run
     files = Dict(k => era5file(era5dir[k], era5code[k], m) for k in keys(era5code))
     if !all(isfile, values(files))
         @warn "missing ERA5 files for $(Dates.format(m, "yyyy-mm"))"
