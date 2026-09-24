@@ -68,6 +68,9 @@ end
 "the data variable in an RDA file (the only variable with 3 dimensions)"
 datavar(ds) = first(k for k in keys(ds) if ndims(ds[k]) == 3)
 
+"the time coordinate variable name in a file (sst uses valid_time, others use time)"
+timevar(ds) = haskey(ds, "valid_time") ? "valid_time" : "time"
+
 "average hourly data to daily (lon x lat) for time indices it, applying f to each hour; missing -> NaN"
 function dailymean(v, it, f=identity)
     x = f.(Float64.(coalesce.(v[:,:,it], NaN)))
@@ -216,7 +219,7 @@ for m in months[1:3] # short test run
     # open and read files
     ds = Dict(k => NCDataset(f) for (k, f) in files)
     vars = Dict(k => d[datavar(d)] for (k, d) in ds)
-    daystamp = Dict(k => Date.(d["time"][:]) for (k, d) in ds) # per file: sources differ
+    daystamp = Dict(k => Date.(d[timevar(d)][:]) for (k, d) in ds) # per file: sources differ (sst: valid_time)
     for d in m:Day(1):lastdayofmonth(m)
         haskey(phaselookup, d) || continue # no BSISO index for this day
         # look up BSISO phase index by day
