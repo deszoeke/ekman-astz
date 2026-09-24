@@ -8,7 +8,7 @@ using Statistics
 phase(b1, b2) = mod(floor(8/(2*pi) * atan(b1, -b2)), 8) + 1
 
 
-ds = readdlm("BSISO.INDEX.NORM.LY.data", header=true)
+ds = readdlm("data/BSISO.INDEX.NORM.LY.data", header=true)
 B = ds[1]
 header = ds[2]
 dt = @. Date(B[:,1], 1, 1) + Day(B[:,2] - 1)
@@ -49,7 +49,7 @@ era5code = (taux="128_229_iews", tauy="128_230_inss", sst="128_034_sstk",
 # directory holding the YYYYMM subdirectories for each variable
 era5dir = (taux=joinpath(ceoasdir, "stress"), tauy=joinpath(ceoasdir, "stress"), 
            sst=joinpath(ceoasdir, "sst"),
-           t2=joinpath(ceoasdir, "t2m"), d2=joinpath(ceoasdir, "d2m"))
+           t2=joinpath(ceoasdir, "t2"), d2=joinpath(ceoasdir, "d2"))
 # SST files are grouped by month directly in the directory data/sst/
 
 "ERA5 RDA file in directory dir for parameter code in the month containing date d"
@@ -58,8 +58,8 @@ function era5file(dir, code, d)
     m1 = lastdayofmonth(d)
     ym = Dates.format(m0, "yyyymm")
     span = Dates.format(m0, "yyyymmdd") * "00_" * Dates.format(m1, "yyyymmdd") * "23"
-    if code=="sst"
-	joinpath(dir, "ERA5_SFC_$(code)_$(ym)_r1440x721_hr.nc")
+    if code=="128_034_sstk"
+	joinpath(dir, "ERA5_SFC_sst_$(ym)_r1440x721_hr.nc")
     else
     	joinpath(dir, ym, "e5.oper.an.sfc.$(code).ll025sc.$(span).nc")
     end
