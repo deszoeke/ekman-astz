@@ -61,6 +61,10 @@ dmadx, dmady = gradient(m_a, lon, lat)
 adv_o = @. -(Mx*dmodx + My*dmody) # -M_o⋅∇m_o
 adv_a = @.  (Mx*dmadx + My*dmady) # -M_a⋅∇m_a, M_a = -M
 
+# land mask from the NaN SST, applied to every panel
+land = isnan.(sst)
+mask(x) = ifelse.(land, NaN, x)
+
 "symmetric color limit: the 98th percentile of |x| over finite points"
 function symlim(x)
     v = sort(abs.(filter(isfinite, vec(x))))
@@ -68,10 +72,10 @@ function symlim(x)
 end
 
 fig, axs = subplots(2, 2, figsize=(14, 7), sharex=true, sharey=true, layout="constrained")
-panels = [(Mx, "Ekman transport Mx", "kg m⁻¹ s⁻¹", "RdBu_r", true),
-          (My, "Ekman transport My", "kg m⁻¹ s⁻¹", "RdBu_r", true),
-          (m_a ./ 1e3, "surface air MSE m_a = c_pa T₂ + L_v q", "kJ kg⁻¹", "viridis", false),
-          (m_o ./ 1e3, "ocean surface enthalpy m_o = c_po SST", "kJ kg⁻¹", "viridis", false)]
+panels = [(mask(Mx), "Ekman transport Mx", "kg m⁻¹ s⁻¹", "RdBu_r", true),
+          (mask(My), "Ekman transport My", "kg m⁻¹ s⁻¹", "RdBu_r", true),
+          (mask(m_a ./ 1e3), "surface air MSE m_a = c_pa T₂ + L_v q", "kJ kg⁻¹", "viridis", false),
+          (mask(m_o ./ 1e3), "ocean surface enthalpy m_o = c_po SST", "kJ kg⁻¹", "viridis", false)]
 # axs is a Python array of axes, indexed from 0 as axs[row, col]
 for (n, (x, title, units, cmap, diverging)) in enumerate(panels)
     ax = axs[(n-1) ÷ 2, (n-1) % 2]
@@ -89,16 +93,18 @@ out = joinpath(@__DIR__, "ekman_V_ma_mo_$(splitext(basename(file))[1])_$k.png")
 savefig(out, dpi=150)
 println("saved $out")
 
-# gradients and Ekman advection; columns: ocean, atmosphere; rows: ∂/∂x, ∂/∂y, -M⋅∇; gradients per km
+# gradients and Ekman advection; columns: ocean, atmosphere; rows: ∂/∂x, ∂/∂y, -M⋅∇; gradients per km.
+# color limits ±lim, or ±symlim(x) where lim is nothing; both advection panels share ±180 W/m^2
 fig, axs = subplots(3, 2, figsize=(14, 10), sharex=true, sharey=true, layout="constrained")
-panels = [(1e3dmodx, "∂m_o/∂x", "J kg⁻¹ km⁻¹"), (1e3dmadx, "∂m_a/∂x", "J kg⁻¹ km⁻¹"),
-          (1e3dmody, "∂m_o/∂y", "J kg⁻¹ km⁻¹"), (1e3dmady, "∂m_a/∂y", "J kg⁻¹ km⁻¹"),
-          (adv_o, "ocean Ekman advection −M_o⋅∇m_o", "W m⁻²"),
-          (adv_a, "atmosphere Ekman advection −M_a⋅∇m_a, M_a = −M_o", "W m⁻²")]
-for (n, (x, title, units)) in enumerate(panels)
+panels = [(mask(1e3dmodx), "∂m_o/∂x", "J kg⁻¹ km⁻¹", nothing), (mask(1e3dmadx), "∂m_a/∂x", "J kg⁻¹ km⁻¹", nothing),
+          (mask(1e3dmody), "∂m_o/∂y", "J kg⁻¹ km⁻¹", nothing), (mask(1e3dmady), "∂m_a/∂y", "J kg⁻¹ km⁻¹", nothing),
+          (mask(adv_o), "ocean Ekman advection −M_o⋅∇m_o", "W m⁻²", 180),
+          (mask(adv_a), "atmosphere Ekman advection −M_a⋅∇m_a, M_a = −M_o", "W m⁻²", 180)]
+for (n, (x, title, units, lim)) in enumerate(panels)
     row, col = (n-1) ÷ 2, (n-1) % 2
     ax = axs[row, col]
-    pc = ax.pcolormesh(lon, lat, permutedims(x), cmap="RdBu_r", vmin=-symlim(x), vmax=symlim(x), shading="nearest")
+    l = something(lim, symlim(x))
+    pc = ax.pcolormesh(lon, lat, permutedims(x), cmap="RdBu_r", vmin=-l, vmax=l, shading="nearest")
     colorbar(pc, ax=ax, label=units)
     ax.set_title(title)
     col == 0 && ax.set_ylabel("latitude")
