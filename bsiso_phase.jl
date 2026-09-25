@@ -24,18 +24,26 @@ B = ds[1]
 header = ds[2]
 dt = @. Date(B[:,1], 1, 1) + Day(B[:,2] - 1)
 
-# save BSISO phases
+# missing days are -999.9 in the index file (e.g. 2015-06-21)
+valid = vec(all(B[:,3:6] .> -999, dims=2))
+
+# save BSISO phases, 0 for missing days
 # YEAR DOY MONTH DATE BSISO1_phase BSISO2_phase
-ph1 = Int.(phase.(B[:,3], B[:,4]))
-ph2 = Int.(phase.(B[:,5], B[:,6]))
+ph1 = Int.(phase.(B[:,3], B[:,4])) .* valid
+ph2 = Int.(phase.(B[:,5], B[:,6])) .* valid
 writedlm("BSISO_phase.txt",
          [["YEAR" "DOY" "MONTH" "DATE" "BSISO1_phase" "BSISO2_phase"];
           year.(dt) dayofyear.(dt) month.(dt) day.(dt) ph1 ph2])
 
-# look up BSISO1 phase by day
-phaselookup = Dict(zip(dt, ph1))
+# BSISO1 amplitude sqrt(PC1^2 + PC2^2) (= column BSISO1 of the index file)
+amp1 = hypot.(B[:,3], B[:,4])
+ampmin = 1.0 # composite only active days, amplitude > ampmin
+active = valid .& (amp1 .> ampmin)
 
-# days of each BSISO1 phase, 2012-2025 (2026 is incomplete); days without an index are left out
+# look up BSISO1 phase by day, for active days only
+phaselookup = Dict(zip(dt[active], ph1[active]))
+
+# days of each BSISO1 phase, 2012-2025 (2026 is incomplete); weak or missing days are left out
 days = Date(2012,1,1):Day(1):Date(2025,12,31)
 # days = Date(2012,1,1):Day(1):Date(2012,3,31) # short test run
 phasedays = [filter(d -> get(phaselookup, d, 0) == p, days) for p in 1:8]
@@ -44,7 +52,8 @@ save_composite("ekman_bsiso1_phase_$(year(first(days)))-$(year(last(days))).nc",
                "phase", 1:8;
                dimattrib=["long_name" => "BSISO1 phase"],
                attrib=["title" => "ERA5 composites of surface fields and Ekman terms by BSISO1 phase",
-                       "days" => "$(first(days)) to $(last(days))"])
+                       "days" => "$(first(days)) to $(last(days))",
+                       "BSISO1_amplitude_min" => ampmin])
 
 taux, tauy, sst, t2, d2, q = (comp[k] for k in fieldkeys)
 adv_sst, adv_t2, adv_q, sdiv_sst, sdiv_t2, sdiv_q = (comp[k] for k in nlkeys)

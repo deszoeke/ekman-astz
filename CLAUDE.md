@@ -23,3 +23,4 @@ Setup on a new machine: `julia --project -e 'using Pkg; Pkg.instantiate()'`. `Ma
 - Nonlinear terms (`adv_s`, `sdiv_s` for s in sst, t2, q) are computed from DAILY means inside the loop, then composited. The flux-form tendency is `adv_s − sdiv_s`.
 - q is computed from HOURLY dewpoint (Buck 1981, p = 1000 hPa), then averaged to daily.
 - m_a and h_o use temperatures in K, i.e. measured from 0 K.
+- BSISO composites use only active days, where BSISO1 amplitude √(PC1² + PC2²) > `ampmin` = 1. Index days with fill values (−999.9, e.g. 2015-06-21) are missing: they get phase 0 in `BSISO_phase.txt` and are never composited.
