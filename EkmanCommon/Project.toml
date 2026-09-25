@@ -1,0 +1,9 @@
+name = "EkmanCommon"
+uuid = "82dea841-1f81-4c2c-8606-796509fb38ae"
+version = "0.1.0"
+
+[deps]
+Dates = "ade2ca70-3891-5945-98fb-dc099432e06a"
+Distributed = "8ba89e20-285c-5b6f-9357-94700520ee1b"
+NCDatasets = "85f8d34a-cbdd-5861-8df4-14fed0d494ab"
+PrecompileTools = "aea7be01-6a6a-4083-8856-8a6e6704d82a"

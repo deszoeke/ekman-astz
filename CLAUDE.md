@@ -1,8 +1,16 @@
 # ekman-astz
 
-`bsiso_phase.jl`: composites of ERA5 surface fields and air-sea Ekman terms, grouped by BSISO1 phase (1–8), 2012–2026.
+`bsiso_phase.jl`: composites of ERA5 surface fields and air-sea Ekman terms, grouped by BSISO1 phase (1–8), 2012–2025.
 
-`ekman_mse.jl`: April–July pentad climatology of the same fields and terms. Run with `julia --project -p N ekman_mse.jl`: `pmap` gives each worker process whole pentads, so there are no shared accumulators and no locks. Use processes, not threads, because NetCDF-C/HDF5 are not thread-safe.
+`ekman_mse.jl`: April–July pentad climatology of the same fields and terms, 2012–2025.
+
+`EkmanCommon/`: local package holding the code both scripts share: the physics, `daily_terms`, `composite` and `save_composite`. It's precompiled, with a PrecompileTools workload on a tiny synthetic grid, so workers load compiled code instead of recompiling it. Scripts load it with `@everywhere using EkmanCommon`. Editing its source triggers a recompile on the next load. Each script sets its own data root, `ceoasdir`, and passes `dir=era5dir(ceoasdir)`.
+
+Each script defines its groups of days (phases or pentads) and calls `composite(groups)`. Run with `julia --project -p N <script>.jl` on Julia 1.13. `pmap` gives each worker process whole groups, so there are no shared accumulators and no locks. Use processes, not threads, because NetCDF-C/HDF5 are not thread-safe.
+
+Setup on a new machine: `julia --project -e 'using Pkg; Pkg.instantiate()'`. `Manifest.toml` is gitignored.
+
+`plots.jl`: all plotting. It reads outputs (e.g. `BSISO_phase.txt`) and runs in the default environment, which has PythonPlot: `julia plots.jl`, without `--project`. Keep PythonPlot out of the project and out of the compositing scripts. Otherwise every worker process loads PythonPlot and CondaPkg, and they recompile and collide on CondaPkg's lock files.
 
 ## Status
 - Tested only on synthetic ERA5-format files; not yet run on real data.

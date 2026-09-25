@@ -219,3 +219,4 @@ __marimo__/
 # Julia
 *.nc
 Manifest.toml
+.CondaPkg/
