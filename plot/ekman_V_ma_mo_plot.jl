@@ -1,10 +1,10 @@
 # Maps of the Ekman mass transport (Mx, My), surface-air moist static energy m_a and
 # ocean-surface enthalpy m_o (h_o in the analysis code), from a composite NetCDF file
 # written by save_composite (ekman_mse.jl, ekman_mse_test.jl, bsiso_phase.jl); and of
-# the gradients of m_o and m_a and their Ekman advection M⋅∇s. The ocean's transport is
+# the gradients of m_o and m_a and their Ekman advection -M⋅∇s. The ocean's transport is
 # M_o = M = (tauy, -taux)/f; the atmosphere's is equal and opposite, M_a = -M_o. Both
 # come from the composite mean stress: advection of the mean by the mean.
-# M⋅∇s > 0 is transport toward higher s (the tendency -M⋅∇s is negative).
+# -M⋅∇s > 0 is advection from higher s, a positive tendency (as adv = -M⋅∇ in ekman_mse.jl).
 # Runs in the plot/ environment, which has PythonPlot and NCDatasets, keeping them (and
 # CondaPkg's plot/.CondaPkg) out of the compositing project:
 #   julia --project=. ekman_V_ma_mo_plot.jl [file.nc] [index along the pentad/phase dimension, default 1]
@@ -58,8 +58,8 @@ m_o = @. c_po*sst       # J/kg, SST in K
 # gradients (J/kg/m) and Ekman advection (W/m^2); ocean M_o = M, atmosphere M_a = -M
 dmodx, dmody = gradient(m_o, lon, lat)
 dmadx, dmady = gradient(m_a, lon, lat)
-adv_o = @.  Mx*dmodx + My*dmody # M_o⋅∇m_o
-adv_a = @. -Mx*dmadx - My*dmady # M_a⋅∇m_a
+adv_o = @. -(Mx*dmodx + My*dmody) # -M_o⋅∇m_o
+adv_a = @.  (Mx*dmadx + My*dmady) # -M_a⋅∇m_a, M_a = -M
 
 "symmetric color limit: the 98th percentile of |x| over finite points"
 function symlim(x)
@@ -89,12 +89,12 @@ out = joinpath(@__DIR__, "ekman_V_ma_mo_$(splitext(basename(file))[1])_$k.png")
 savefig(out, dpi=150)
 println("saved $out")
 
-# gradients and Ekman advection; columns: ocean, atmosphere; rows: ∂/∂x, ∂/∂y, M⋅∇; gradients per km
+# gradients and Ekman advection; columns: ocean, atmosphere; rows: ∂/∂x, ∂/∂y, -M⋅∇; gradients per km
 fig, axs = subplots(3, 2, figsize=(14, 10), sharex=true, sharey=true, layout="constrained")
 panels = [(1e3dmodx, "∂m_o/∂x", "J kg⁻¹ km⁻¹"), (1e3dmadx, "∂m_a/∂x", "J kg⁻¹ km⁻¹"),
           (1e3dmody, "∂m_o/∂y", "J kg⁻¹ km⁻¹"), (1e3dmady, "∂m_a/∂y", "J kg⁻¹ km⁻¹"),
-          (adv_o, "ocean Ekman advection M_o⋅∇m_o", "W m⁻²"),
-          (adv_a, "atmosphere Ekman advection M_a⋅∇m_a, M_a = −M_o", "W m⁻²")]
+          (adv_o, "ocean Ekman advection −M_o⋅∇m_o", "W m⁻²"),
+          (adv_a, "atmosphere Ekman advection −M_a⋅∇m_a, M_a = −M_o", "W m⁻²")]
 for (n, (x, title, units)) in enumerate(panels)
     row, col = (n-1) ÷ 2, (n-1) % 2
     ax = axs[row, col]
