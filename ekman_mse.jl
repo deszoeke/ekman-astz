@@ -1,14 +1,19 @@
+using Distributed
 using PythonPlot
-using Dates
-using NCDatasets
-using Statistics
 
 # Pentad (5-day) climatologies of ERA5 surface fields and air-sea Ekman terms for April-July.
-# loop over years, and the months containing the selected pentads, opening each month's files once
+# Run with worker processes, e.g. `julia --project -p 8 ekman_mse.jl`; each worker composites whole pentads.
+# for each pentad, loop over its days in every year
 #   average hourly data to daily
 #   compute daily Ekman transport and the nonlinear terms
 #   add finite values to the pentad sums, counting them at each grid point
 # climatological mean = sum / count at each grid point (NaN where nobs is 0, e.g. sst over land)
+
+# define everything below on all worker processes too
+@everywhere begin
+using Dates
+using NCDatasets
+using Statistics
 
 # ERA5 hourly surface analysis from NCAR RDA d633000, one file per variable per month:
 # adjust to local directory structure
@@ -196,6 +201,7 @@ scalars = (sst=1, t2=-1, q=-1)
 # so the flux-form tendency is -∇⋅(±M s) = adv_s - sdiv_s
 nlkeys = (Symbol.(:adv_,  keys(scalars))..., Symbol.(:sdiv_, keys(scalars))...)
 fieldkeys = (keys(era5code)..., :q) # taux, tauy, sst, t2, d2, q
+keys_all  = (fieldkeys..., nlkeys...)
 
 "pentad (1-73) of date d, on the 365-day calendar (Feb 29 joins pentad 12)"
 pentad(d) = (dayofyear(d) - (isleapyear(d) && month(d) > 2) - 1) ÷ 5 + 1
@@ -214,72 +220,81 @@ function accumulate!(S, N, x)
 end
 
 """
+    daily_terms(d, lon, lat; dir=era5dir, code=era5code, Ro_rad=Ro_rad, scalars=scalars)
+
+Daily means (lon x lat) on date d of the ERA5 fields, q from hourly dewpoint, and the
+nonlinear Ekman terms computed from them, as a NamedTuple with keys `keys_all`.
+Returns nothing, with a warning, if the files or hours for d are missing.
+"""
+function daily_terms(d, lon, lat; dir=era5dir, code=era5code, Ro_rad=Ro_rad, scalars=scalars)
+    files = map((dk, ck) -> era5file(dk, ck, d), dir, code)
+    if !all(isfile, files)
+        @warn "missing ERA5 files for $d" filter(!isfile, collect(files))
+        return nothing
+    end
+    x = withdatasets(files) do ds
+        # every source must be on the stress grid (sst and t2/d2 come from a different archive)
+        for (k, f) in pairs(ds)
+            f["latitude"][:] ≈ lat && f["longitude"][:] ≈ lon ||
+                error("$k grid in $(files[k]) differs from the stress grid")
+        end
+        it = map(f -> asrange(findall(==(d), Date.(f[timevar(f)][:]))), ds) # sst: valid_time
+        if any(isempty, it)
+            @warn "missing hours on $d"
+            return nothing
+        end
+        # average hourly data to daily; q from hourly dewpoint, then daily mean
+        hours(k) = ds[k][datavar(ds[k])][:, :, it[k]]
+        hd2 = hours(:d2)
+        (taux=dailymean(hours(:taux)), tauy=dailymean(hours(:tauy)), sst=dailymean(hours(:sst)),
+         t2=dailymean(hours(:t2)), d2=dailymean(hd2), q=dailymean(hd2, qsat_dew))
+    end
+    isnothing(x) && return nothing
+    # daily Ekman transport and its divergence
+    Mx, My = ekman_transport_xy(x.taux, x.tauy, lat; Ro_rad=Ro_rad)
+    divM = divergence(Mx, My, lon, lat)
+    adv  = Tuple(sgn .* advection(Mx, My, x[s], lon, lat) for (s, sgn) in pairs(scalars))
+    sdiv = Tuple(sgn .* divM .* x[s] for (s, sgn) in pairs(scalars))
+    merge(x, NamedTuple{Symbol.(:adv_,  keys(scalars))}(adv),
+             NamedTuple{Symbol.(:sdiv_, keys(scalars))}(sdiv))
+end
+
+"""
+    pentad_mean(years, p, lon, lat; kw...)
+
+Mean over `years` of the finite daily values (see `daily_terms`, which takes `kw`) in pentad p.
+Returns (mean, nobs), NamedTuples of lon x lat arrays; the mean is NaN where nobs is 0.
+"""
+function pentad_mean(years, p, lon, lat; kw...)
+    S = NamedTuple{keys_all}(Tuple(zeros(length(lon), length(lat)) for k in keys_all))
+    N = NamedTuple{keys_all}(Tuple(zeros(Int16, length(lon), length(lat)) for k in keys_all))
+    for y in years, d in pentaddays(y, p:p)
+        x = daily_terms(d, lon, lat; kw...)
+        isnothing(x) || foreach(accumulate!, S, N, x)
+    end
+    map((s, n) -> s ./ n, S, N), N
+end
+
+"""
     pentad_climatology(years, pentads; dir=era5dir, code=era5code, Ro_rad=Ro_rad, scalars=scalars)
 
 Climatological mean (lon x lat x pentad) over `years` of the ERA5 fields and the
 nonlinear Ekman terms for each pentad in the range `pentads`. Means are taken over
 the finite daily values at each grid point, so a missing hour or a land point
-drops out of that point's mean instead of making it NaN. Returns (comp, nobs, lon, lat).
+drops out of that point's mean instead of making it NaN. The pentads are
+distributed over the worker processes. Returns (comp, nobs, lon, lat).
 """
 function pentad_climatology(years, pentads::UnitRange; dir=era5dir, code=era5code,
                             Ro_rad=Ro_rad, scalars=scalars)
     lon, lat = NCDataset(era5file(dir.taux, code.taux, first(pentaddays(first(years), pentads)))) do ds
         Float64.(ds["longitude"][:]), Float64.(ds["latitude"][:])
     end
-    nx, ny, np = length(lon), length(lat), length(pentads)
-    keys_all = (fieldkeys..., nlkeys...)
-    comp  = Dict(k => zeros(nx, ny, np) for k in keys_all)
-    nobs  = Dict(k => zeros(Int16, nx, ny, np) for k in keys_all)
-
-    for y in years
-        days = pentaddays(y, pentads)
-        for m in unique(firstdayofmonth.(days))
-            files = map((dk, ck) -> era5file(dk, ck, m), dir, code)
-            if !all(isfile, files)
-                @warn "missing ERA5 files for $(Dates.format(m, "yyyy-mm"))" filter(!isfile, collect(files))
-                continue
-            end
-            withdatasets(files) do ds
-                # every source must be on the stress grid (sst and t2/d2 come from a different archive)
-                for (k, d) in pairs(ds)
-                    d["latitude"][:] ≈ lat && d["longitude"][:] ≈ lon ||
-                        error("$k grid in $(files[k]) differs from the stress grid")
-                end
-                vars = map(d -> d[datavar(d)], ds)
-                daystamp = map(d -> Date.(d[timevar(d)][:]), ds) # sst: valid_time
-                for d in filter(d -> firstdayofmonth(d) == m, days)
-                    ip = pentad(d) - first(pentads) + 1
-                    it = map(t -> asrange(findall(==(d), t)), daystamp)
-                    if any(isempty, it)
-                        @warn "missing hours on $d"
-                        continue
-                    end
-                    # average hourly data to daily, reading each variable's hours once;
-                    # q from hourly dewpoint, then daily mean
-                    x = Dict{Symbol,Matrix{Float64}}()
-                    for k in keys(vars)
-                        h = vars[k][:, :, it[k]]
-                        x[k] = dailymean(h)
-                        k == :d2 && (x[:q] = dailymean(h, qsat_dew))
-                    end
-                    # daily Ekman transport and its divergence
-                    Mx, My = ekman_transport_xy(x[:taux], x[:tauy], lat; Ro_rad=Ro_rad)
-                    divM = divergence(Mx, My, lon, lat)
-                    for (s, sgn) in pairs(scalars)
-                        x[Symbol(:adv_, s)]  = sgn .* advection(Mx, My, x[s], lon, lat)
-                        x[Symbol(:sdiv_, s)] = sgn .* divM .* x[s]
-                    end
-                    for k in keys_all
-                        accumulate!(view(comp[k], :, :, ip), view(nobs[k], :, :, ip), x[k])
-                    end
-                end
-            end
-        end
-    end
-    # climatological mean; NaN where there are no finite values
-    for k in keys_all
-        comp[k] ./= nobs[k]
-    end
+    # each worker composites whole pentads, so no two processes share an accumulator
+    r = pmap(p -> pentad_mean(years, p, lon, lat; dir=dir, code=code, Ro_rad=Ro_rad, scalars=scalars),
+             pentads)
+    # stack the pentads (lon x lat x pentad)
+    comp = map(k -> stack(ri[1][k] for ri in r), NamedTuple{keys_all}(keys_all))
+    nobs = map(k -> stack(ri[2][k] for ri in r), NamedTuple{keys_all}(keys_all))
     comp, nobs, lon, lat
 end
 
@@ -312,6 +327,7 @@ function save_climatology(file, comp, nobs, lon, lat, years, pentads)
         end
     end
 end
+end # @everywhere
 
 # April-July: pentads 19 (Apr 1-5) through 43 (Jul 30-Aug 3)
 years   = 2012:2026
@@ -326,10 +342,10 @@ adv_sst, adv_t2, adv_q, sdiv_sst, sdiv_t2, sdiv_q = (comp[k] for k in nlkeys)
 # compute full advection and scalar divergence of 
 adv_h_o = c_po * adv_sst
 adv_h_a = c_pa * adv_t2
-adv_m_a = adv_h_a + L * adv_q
+adv_m_a = adv_h_a + Lv * adv_q
 sdiv_h_o = c_po * sdiv_sst
 sdiv_h_a = c_pa * sdiv_t2
-sdiv_m_a = adv_h_a * sdiv_t2 + L*sdiv_q
+sdiv_m_a = sdiv_h_a + Lv * sdiv_q
 # NOTE the signs of these are defined as if 
 # they are on opposite sides of the equation!
 # adv  = -M⋅∇
