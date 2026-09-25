@@ -260,17 +260,21 @@ function daily_terms(d, lon, lat; dir=era5dir, code=era5code, Ro_rad=Ro_rad, sca
 end
 
 """
-    pentad_mean(years, p, lon, lat; kw...)
+    pentad_mean(years, p, lon, lat; progress=nothing, kw...)
 
 Mean over `years` of the finite daily values (see `daily_terms`, which takes `kw`) in pentad p.
 Returns (mean, nobs), NamedTuples of lon x lat arrays; the mean is NaN where nobs is 0.
+If `progress` is a channel, put p on it as each year of the pentad finishes.
 """
-function pentad_mean(years, p, lon, lat; kw...)
+function pentad_mean(years, p, lon, lat; progress=nothing, kw...)
     S = NamedTuple{keys_all}(Tuple(zeros(length(lon), length(lat)) for k in keys_all))
     N = NamedTuple{keys_all}(Tuple(zeros(Int16, length(lon), length(lat)) for k in keys_all))
-    for y in years, d in pentaddays(y, p:p)
-        x = daily_terms(d, lon, lat; kw...)
-        isnothing(x) || foreach(accumulate!, S, N, x)
+    for y in years
+        for d in pentaddays(y, p:p)
+            x = daily_terms(d, lon, lat; kw...)
+            isnothing(x) || foreach(accumulate!, S, N, x)
+        end
+        isnothing(progress) || put!(progress, p)
     end
     map((s, n) -> s ./ n, S, N), N
 end
@@ -282,16 +286,25 @@ Climatological mean (lon x lat x pentad) over `years` of the ERA5 fields and the
 nonlinear Ekman terms for each pentad in the range `pentads`. Means are taken over
 the finite daily values at each grid point, so a missing hour or a land point
 drops out of that point's mean instead of making it NaN. The pentads are
-distributed over the worker processes. Returns (comp, nobs, lon, lat).
+distributed over the worker processes. Progress is a counter of finished
+pentad-years, redrawn in place. Returns (comp, nobs, lon, lat).
 """
 function pentad_climatology(years, pentads::UnitRange; dir=era5dir, code=era5code,
                             Ro_rad=Ro_rad, scalars=scalars)
     lon, lat = NCDataset(era5file(dir.taux, code.taux, first(pentaddays(first(years), pentads)))) do ds
         Float64.(ds["longitude"][:]), Float64.(ds["latitude"][:])
     end
+    # workers report each finished pentad-year to the main process, which counts and prints
+    progress = RemoteChannel(() -> Channel{Int}(256))
+    total = length(years) * length(pentads)
+    printer = @async for (n, _) in enumerate(progress)
+        print("\r$n/$total pentad-years"); flush(stdout)
+    end
     # each worker composites whole pentads, so no two processes share an accumulator
-    r = pmap(p -> pentad_mean(years, p, lon, lat; dir=dir, code=code, Ro_rad=Ro_rad, scalars=scalars),
+    r = pmap(p -> pentad_mean(years, p, lon, lat; progress=progress,
+                              dir=dir, code=code, Ro_rad=Ro_rad, scalars=scalars),
              pentads)
+    close(progress); wait(printer); println()
     # stack the pentads (lon x lat x pentad)
     comp = map(k -> stack(ri[1][k] for ri in r), NamedTuple{keys_all}(keys_all))
     nobs = map(k -> stack(ri[2][k] for ri in r), NamedTuple{keys_all}(keys_all))
@@ -330,7 +343,7 @@ end
 end # @everywhere
 
 # April-July: pentads 19 (Apr 1-5) through 43 (Jul 30-Aug 3)
-years   = 2012:2026
+years   = 2012:2025 # 2026 is incomplete
 pentads = 19:43
 comp, nobs, lon, lat = pentad_climatology(years, pentads)
 # comp, nobs, lon, lat = pentad_climatology(2012:2012, 19:20) # short test run
