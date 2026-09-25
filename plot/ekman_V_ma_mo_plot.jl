@@ -1,10 +1,14 @@
 # Maps of the Ekman mass transport (Mx, My), surface-air moist static energy m_a and
 # ocean-surface enthalpy m_o (h_o in the analysis code), from a composite NetCDF file
-# written by save_composite (ekman_mse.jl, ekman_mse_test.jl, bsiso_phase.jl).
+# written by save_composite (ekman_mse.jl, ekman_mse_test.jl, bsiso_phase.jl); and of
+# the gradients of m_o and m_a and their Ekman advection M⋅∇s. The ocean's transport is
+# M_o = M = (tauy, -taux)/f; the atmosphere's is equal and opposite, M_a = -M_o. Both
+# come from the composite mean stress: advection of the mean by the mean.
+# M⋅∇s > 0 is transport toward higher s (the tendency -M⋅∇s is negative).
 # Runs in the plot/ environment, which has PythonPlot and NCDatasets, keeping them (and
 # CondaPkg's plot/.CondaPkg) out of the compositing project:
-#   julia --project=plot plot/ekman_V_ma_mo.jl [file.nc] [index along the pentad/phase dimension, default 1]
-# Saves plot/ekman_V_ma_mo_<file>_<index>.png next to this script.
+#   julia --project=. ekman_V_ma_mo_plot.jl [file.nc] [index along the pentad/phase dimension, default 1]
+# Saves ekman_V_ma_mo_<file>_<index>.png and ekman_grad_adv_<file>_<index>.png next to this script.
 using NCDatasets
 using PythonPlot
 
@@ -26,6 +30,19 @@ function ekman_transport(taux, tauy, lat, Ro_rad)
     (r*tauy/f, -r*taux/f)
 end
 
+"centered-difference gradient (∂φ/∂x, ∂φ/∂y) on the sphere of φ (lon x lat, global lon); NaN at the first/last latitude"
+function gradient(φ, lon, lat)
+    nx, ny = size(φ)
+    dφdx, dφdy = fill(NaN, nx, ny), fill(NaN, nx, ny)
+    for j in 1:ny, i in 1:nx
+        ip, im = mod1(i+1, nx), mod1(i-1, nx)
+        c = cosd(lat[j])
+        c > 1e-10 && (dφdx[i,j] = (φ[ip,j] - φ[im,j]) / (a*c*deg2rad(mod(lon[ip] - lon[im], 360))))
+        1 < j < ny && (dφdy[i,j] = (φ[i,j+1] - φ[i,j-1]) / (a*deg2rad(lat[j+1] - lat[j-1])))
+    end
+    dφdx, dφdy
+end
+
 lon, lat, taux, tauy, sst, t2, q, Ro_rad, dim, dimval = NCDataset(file; maskingvalue=NaN) do ds
     dim = last(dimnames(ds["taux"]))
     (ds["longitude"][:], ds["latitude"][:],
@@ -37,6 +54,12 @@ M  = ekman_transport.(taux, tauy, lat', Ro_rad)
 Mx, My = first.(M), last.(M)
 m_a = @. c_pa*t2 + Lv*q # J/kg, T in K
 m_o = @. c_po*sst       # J/kg, SST in K
+
+# gradients (J/kg/m) and Ekman advection (W/m^2); ocean M_o = M, atmosphere M_a = -M
+dmodx, dmody = gradient(m_o, lon, lat)
+dmadx, dmady = gradient(m_a, lon, lat)
+adv_o = @.  Mx*dmodx + My*dmody # M_o⋅∇m_o
+adv_a = @. -Mx*dmadx - My*dmady # M_a⋅∇m_a
 
 "symmetric color limit: the 98th percentile of |x| over finite points"
 function symlim(x)
@@ -63,5 +86,26 @@ end
 fig.suptitle("$(basename(file)): $dim $dimval (Ro_rad = $(Ro_rad/1e3) km)")
 
 out = joinpath(@__DIR__, "ekman_V_ma_mo_$(splitext(basename(file))[1])_$k.png")
+savefig(out, dpi=150)
+println("saved $out")
+
+# gradients and Ekman advection; columns: ocean, atmosphere; rows: ∂/∂x, ∂/∂y, M⋅∇; gradients per km
+fig, axs = subplots(3, 2, figsize=(14, 10), sharex=true, sharey=true, layout="constrained")
+panels = [(1e3dmodx, "∂m_o/∂x", "J kg⁻¹ km⁻¹"), (1e3dmadx, "∂m_a/∂x", "J kg⁻¹ km⁻¹"),
+          (1e3dmody, "∂m_o/∂y", "J kg⁻¹ km⁻¹"), (1e3dmady, "∂m_a/∂y", "J kg⁻¹ km⁻¹"),
+          (adv_o, "ocean Ekman advection M_o⋅∇m_o", "W m⁻²"),
+          (adv_a, "atmosphere Ekman advection M_a⋅∇m_a, M_a = −M_o", "W m⁻²")]
+for (n, (x, title, units)) in enumerate(panels)
+    row, col = (n-1) ÷ 2, (n-1) % 2
+    ax = axs[row, col]
+    pc = ax.pcolormesh(lon, lat, permutedims(x), cmap="RdBu_r", vmin=-symlim(x), vmax=symlim(x), shading="nearest")
+    colorbar(pc, ax=ax, label=units)
+    ax.set_title(title)
+    col == 0 && ax.set_ylabel("latitude")
+    row == 2 && ax.set_xlabel("longitude")
+end
+fig.suptitle("$(basename(file)): $dim $dimval (Ro_rad = $(Ro_rad/1e3) km)")
+
+out = joinpath(@__DIR__, "ekman_grad_adv_$(splitext(basename(file))[1])_$k.png")
 savefig(out, dpi=150)
 println("saved $out")
