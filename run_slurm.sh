@@ -20,11 +20,12 @@ set -euo pipefail
 script=${1:-ekman_mse.jl}
 cd "$SLURM_SUBMIT_DIR"
 
-# If the nodes have different CPU types, a common compile target stops each type from
-# precompiling its own copy (and workers from colliding on lock files), e.g.
-# export JULIA_CPU_TARGET="generic;skylake-avx512,clone_all;icelake-server,clone_all"
+# the same compile target as precompile_slurm.sh (head and compute nodes differ), taken from
+# its export line so the two can't drift apart; a different target would rebuild the caches
+eval "$(grep '^export JULIA_CPU_TARGET=' precompile_slurm.sh)"
 
-# precompile once, here, before any worker starts, so the workers only load the cache
+# precompile ahead of time with ./precompile_slurm.sh on the head node; this only loads the
+# cache (or builds anything stale, once, before any worker starts)
 julia --project -e 'using EkmanCommon, SlurmClusterManager'
 
 # the main process runs here; the script's addprocs(SlurmManager()) srun's the workers
