@@ -283,28 +283,71 @@ function pentad_climatology(years, pentads::UnitRange; dir=era5dir, code=era5cod
     comp, nobs, lon, lat
 end
 
+# units of the saved fields; M in kg/m/s, so M⋅∇s and s∇⋅M are in kg/m^2/s times the units of s
+units = (taux="N m-2", tauy="N m-2", sst="K", t2="K", d2="K", q="kg kg-1",
+         adv_sst="K kg m-2 s-1", adv_t2="K kg m-2 s-1", adv_q="kg m-2 s-1",
+         sdiv_sst="K kg m-2 s-1", sdiv_t2="K kg m-2 s-1", sdiv_q="kg m-2 s-1")
+
+"""
+    save_climatology(file, comp, nobs, lon, lat, years, pentads)
+
+Write the pentad climatology to NetCDF `file` (overwritten): each field k of `comp` as
+Float32 (NaN fill), and its count of daily values as Int16 `nobs_k`, on (longitude, latitude, pentad).
+"""
+function save_climatology(file, comp, nobs, lon, lat, years, pentads)
+    NCDataset(file, "c", attrib=["title" => "ERA5 pentad climatology of surface fields and Ekman terms",
+                                 "years" => "$(first(years))-$(last(years))",
+                                 "Ro_rad_m" => Ro_rad,
+                                 "history" => "$(now()) ekman_mse.jl"]) do ds
+        defVar(ds, "longitude", lon, ("longitude",), attrib=["units" => "degrees_east"])
+        defVar(ds, "latitude",  lat, ("latitude",),  attrib=["units" => "degrees_north"])
+        defVar(ds, "pentad", collect(Int32, pentads), ("pentad",),
+               attrib=["long_name" => "pentad of year (1-73), 365-day calendar, Feb 29 in pentad 12"])
+        dims = ("longitude", "latitude", "pentad")
+        for k in keys(comp)
+            defVar(ds, String(k), Float32.(comp[k]), dims; fillvalue=NaN32, deflatelevel=4,
+                   attrib=["units" => get(units, k, "")])
+            defVar(ds, "nobs_$k", nobs[k], dims; deflatelevel=4,
+                   attrib=["long_name" => "number of daily values in the mean of $k"])
+        end
+    end
+end
+
 # April-July: pentads 19 (Apr 1-5) through 43 (Jul 30-Aug 3)
 years   = 2012:2026
 pentads = 19:43
 comp, nobs, lon, lat = pentad_climatology(years, pentads)
 # comp, nobs, lon, lat = pentad_climatology(2012:2012, 19:20) # short test run
+save_climatology("ekman_pentad_clim_$(first(years))-$(last(years)).nc", comp, nobs, lon, lat, years, pentads)
 
 taux, tauy, sst, t2, d2, q = (comp[k] for k in fieldkeys)
 adv_sst, adv_t2, adv_q, sdiv_sst, sdiv_t2, sdiv_q = (comp[k] for k in nlkeys)
 
-# specific moist static energy of surface air, m_a = c_pa*Ta + Lv*q (J/kg; T in K, z=2 m term neglected)
+# compute full advection and scalar divergence of 
+adv_h_o = c_po * adv_sst
+adv_h_a = c_pa * adv_t2
+adv_m_a = adv_h_a + L * adv_q
+sdiv_h_o = c_po * sdiv_sst
+sdiv_h_a = c_pa * sdiv_t2
+sdiv_m_a = adv_h_a * sdiv_t2 + L*sdiv_q
+# NOTE the signs of these are defined as if 
+# they are on opposite sides of the equation!
+# adv  = -M⋅∇
+# sdiv = +∇⋅M
+
+# Compute advection of the mean by the mean Ekman mass transport
+
+# mean specific moist static energy of surface air, m_a = c_pa*Ta + Lv*q (J/kg; T in K, z=2 m term neglected)
 m_a = @. c_pa*t2 + Lv*q
 # specific enthalpy of ocean surface water, h_o = c_po*SST (J/kg; SST in K)
 h_o = @. c_po*sst
 
-# Ekman mass transport of climatological mean stress (lon x lat x pentad), curtailed within ~Ro_rad of the equator
+# mean Ekman mass transport of climatological mean stress (lon x lat x pentad), curtailed within ~Ro_rad of the equator
 Mx, My = ekman_transport_xy(taux, tauy, lat; Ro_rad=Ro_rad)
-divM = divergence(Mx, My, lon, lat)
-
+divM = divergence(Mx, My, lon, lat) # mean divergence of Ekman mass transport
 # gradients of ocean enthalpy and surface air moist static energy (J/kg/m)
 dhodx, dhody = gradient(h_o, lon, lat)
 dmadx, dmady = gradient(m_a, lon, lat)
-
 # advection of climatological means by climatological Ekman mass transport (W/m^2): -M⋅∇
 # ocean Ekman transport is M; atmospheric Ekman transport is equal and opposite, -M
 adv_ho = @. -(Mx*dhodx + My*dhody)
