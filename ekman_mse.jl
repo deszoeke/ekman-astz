@@ -1,7 +1,14 @@
 using Distributed
+# inside a Slurm job (see run_slurm.sh), start one worker per Slurm task, on any of its nodes;
+# otherwise use `julia --project -p N` for local workers, or none
+if haskey(ENV, "SLURM_JOB_ID")
+    using SlurmClusterManager
+    addprocs(SlurmManager(); exeflags="--project=$(Base.active_project())")
+end
 
 # Pentad (5-day) climatologies of ERA5 surface fields and air-sea Ekman terms for April-July.
-# Run with worker processes, e.g. `julia --project -p 8 ekman_mse.jl`; each worker composites whole pentads.
+# Run with worker processes, e.g. `julia --project -p 8 ekman_mse.jl`, or on Slurm `sbatch run_slurm.sh ekman_mse.jl`;
+# each worker composites whole pentads.
 # for each pentad, loop over its days in every year
 #   average hourly data to daily
 #   compute daily Ekman transport and the nonlinear terms

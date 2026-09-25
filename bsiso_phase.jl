@@ -1,8 +1,15 @@
 using Distributed
+# inside a Slurm job (see run_slurm.sh), start one worker per Slurm task, on any of its nodes;
+# otherwise use `julia --project -p N` for local workers, or none
+if haskey(ENV, "SLURM_JOB_ID")
+    using SlurmClusterManager
+    addprocs(SlurmManager(); exeflags="--project=$(Base.active_project())")
+end
 using DelimitedFiles
 
 # Composites of ERA5 surface fields and air-sea Ekman terms by BSISO1 phase (1-8).
-# Run with worker processes, e.g. `julia --project -p 8 bsiso_phase.jl`; each worker composites whole phases.
+# Run with worker processes, e.g. `julia --project -p 8 bsiso_phase.jl`, or on Slurm
+# `sbatch --nodes=1 --ntasks-per-node=8 run_slurm.sh bsiso_phase.jl`; each worker composites whole phases.
 # for each phase, loop over its days
 #   average hourly data to daily
 #   compute daily Ekman transport and the nonlinear terms

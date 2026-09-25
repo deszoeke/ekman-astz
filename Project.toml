@@ -1,6 +1,7 @@
 [deps]
 EkmanCommon = "82dea841-1f81-4c2c-8606-796509fb38ae"
 NCDatasets = "85f8d34a-cbdd-5861-8df4-14fed0d494ab"
+SlurmClusterManager = "c82cd089-7bf7-41d7-976b-6b5d413cbe0a"
 
 [sources]
 EkmanCommon = {path = "EkmanCommon"}
