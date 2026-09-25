@@ -39,7 +39,7 @@ pentad_climatology(years, pentads::UnitRange; kw...) =
     composite([[d for y in years for d in pentaddays(y, p:p)] for p in pentads]; kw...)
 
 # April-July: pentads 19 (Apr 1-5) through 43 (Jul 30-Aug 3)
-years   = 2012:2025 # 2026 is incomplete
+years   = 2012:2020 # Andrea's data stops at 2020; 2026 is incomplete
 pentads = 19:43
 comp, nobs, lon, lat = pentad_climatology(years, pentads; dir=era5dir(ceoasdir))
 # comp, nobs, lon, lat = pentad_climatology(2012:2012, 19:20; dir=era5dir(ceoasdir)) # short test run

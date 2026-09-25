@@ -4,13 +4,12 @@
 using Dates
 using EkmanCommon
 
-# ERA5 data root, e.g. "/storage/ceoas-datasets/datasets/ERA5/staging/andrea/1hr/SFC"
 ceoasdir = "./data"
 
 "pentad (1-73) of date d, on the 365-day calendar (Feb 29 joins pentad 12)"
 pentad(d) = (dayofyear(d) - (isleapyear(d) && month(d) > 2) - 1) ÷ 5 + 1
 
-d0 = Date(2023, 6, 4)
+d0 = Date(2020, 6, 4)
 p  = pentad(d0)
 days = filter(d -> pentad(d) == p, Date(year(d0),1,1):Day(1):Date(year(d0),12,31))
 println("pentad $p of $(year(d0)): $(first(days)) to $(last(days))")
