@@ -11,7 +11,7 @@
 #SBATCH --mem=32G
 #SBATCH --time=12:00:00
 #SBATCH --output=%x-%j.out
-##SBATCH --partition=...
+#SBATCH --partition=ceoas
 ##SBATCH --account=...
 # --mem is per node: ~1 GB per worker, plus ~6 GB on the first node for the main
 # process, which collects and stacks all the composites.
