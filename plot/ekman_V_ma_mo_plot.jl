@@ -8,7 +8,7 @@
 using NCDatasets
 using PythonPlot
 
-file = get(ARGS, 1, "ekman_pentad31_2020_test.nc")
+file = get(ARGS, 1, "../ekman_pentad31_2020_test.nc")
 k    = parse(Int, get(ARGS, 2, "1"))
 
 # constants and Ekman transport as in EkmanCommon
