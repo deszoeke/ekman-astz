@@ -12,6 +12,17 @@
 using NCDatasets
 using PythonPlot
 
+# sans-serif text in the first of these fonts that is installed (not all systems have all),
+# and math ($...$: symbols, super/subscripts) in the same font; the few symbols it lacks,
+# e.g. ∇, come from STIX sans, bundled with matplotlib, rather than DejaVu Sans
+let rc = PythonPlot.matplotlib.rcParams
+    rc["font.family"] = "sans-serif"
+    rc["font.sans-serif"] = PythonPlot.PythonCall.pylist(["Liberation Sans", "Nimbus Sans", "Arial", "Helvetica", "Verdana"])
+    rc["mathtext.fontset"] = "custom"
+    rc["mathtext.rm"], rc["mathtext.it"], rc["mathtext.bf"] = "sans", "sans:italic", "sans:bold"
+    rc["mathtext.fallback"] = "stixsans"
+end
+
 file = get(ARGS, 1, "../ekman_pentad31_2020_test.nc")
 k    = parse(Int, get(ARGS, 2, "1"))
 
@@ -72,10 +83,10 @@ function symlim(x)
 end
 
 fig, axs = subplots(2, 2, figsize=(14, 7), sharex=true, sharey=true, layout="constrained")
-panels = [(mask(Mx), "Ekman transport Mx", "kg m⁻¹ s⁻¹", "RdBu_r", true),
-          (mask(My), "Ekman transport My", "kg m⁻¹ s⁻¹", "RdBu_r", true),
-          (mask(m_a ./ 1e3), "surface air MSE m_a = c_pa T₂ + L_v q", "kJ kg⁻¹", "viridis", false),
-          (mask(m_o ./ 1e3), "ocean surface enthalpy m_o = c_po SST", "kJ kg⁻¹", "viridis", false)]
+panels = [(mask(Mx), raw"Ekman transport $M_x$", raw"kg m$^{-1}$ s$^{-1}$", "RdBu_r", true),
+          (mask(My), raw"Ekman transport $M_y$", raw"kg m$^{-1}$ s$^{-1}$", "RdBu_r", true),
+          (mask(m_a ./ 1e3), raw"surface air MSE $m_a = c_{pa} T_2 + L_v q$", raw"kJ kg$^{-1}$", "viridis", false),
+          (mask(m_o ./ 1e3), raw"ocean surface enthalpy $m_o = c_{po}$ SST", raw"kJ kg$^{-1}$", "viridis", false)]
 # axs is a Python array of axes, indexed from 0 as axs[row, col]
 for (n, (x, title, units, cmap, diverging)) in enumerate(panels)
     ax = axs[(n-1) ÷ 2, (n-1) % 2]
@@ -96,10 +107,10 @@ println("saved $out")
 # gradients and Ekman advection; columns: ocean, atmosphere; rows: ∂/∂x, ∂/∂y, -M⋅∇; gradients per km.
 # color limits ±lim, or ±symlim(x) where lim is nothing; both advection panels share ±180 W/m^2
 fig, axs = subplots(3, 2, figsize=(14, 10), sharex=true, sharey=true, layout="constrained")
-panels = [(mask(1e3dmodx), "∂m_o/∂x", "J kg⁻¹ km⁻¹", nothing), (mask(1e3dmadx), "∂m_a/∂x", "J kg⁻¹ km⁻¹", nothing),
-          (mask(1e3dmody), "∂m_o/∂y", "J kg⁻¹ km⁻¹", nothing), (mask(1e3dmady), "∂m_a/∂y", "J kg⁻¹ km⁻¹", nothing),
-          (mask(adv_o), "ocean Ekman advection −M_o⋅∇m_o", "W m⁻²", 180),
-          (mask(adv_a), "atmosphere Ekman advection −M_a⋅∇m_a, M_a = −M_o", "W m⁻²", 180)]
+panels = [(mask(1e3dmodx), raw"$\partial m_o/\partial x$", raw"J kg$^{-1}$ km$^{-1}$", nothing), (mask(1e3dmadx), raw"$\partial m_a/\partial x$", raw"J kg$^{-1}$ km$^{-1}$", nothing),
+          (mask(1e3dmody), raw"$\partial m_o/\partial y$", raw"J kg$^{-1}$ km$^{-1}$", nothing), (mask(1e3dmady), raw"$\partial m_a/\partial y$", raw"J kg$^{-1}$ km$^{-1}$", nothing),
+          (mask(adv_o), raw"ocean Ekman advection $-M_o \cdot \nabla m_o$", raw"W m$^{-2}$", 180),
+          (mask(adv_a), raw"atmosphere Ekman advection $-M_a \cdot \nabla m_a$, $M_a = -M_o$", raw"W m$^{-2}$", 180)]
 for (n, (x, title, units, lim)) in enumerate(panels)
     row, col = (n-1) ÷ 2, (n-1) % 2
     ax = axs[row, col]
