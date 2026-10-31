@@ -1,9 +1,5 @@
 #!/bin/bash
-# Use the Slurm scripts' JULIA_CPU_TARGET so Julia shares their precompiled caches
-# (overrides any value in ~/.bashrc, which other projects may need).
-#   ./julia_hpc.sh [julia args]   run Julia in this project, e.g. ./julia_hpc.sh -p 4 script.jl
-#   source julia_hpc.sh           only export the target in the current shell
-here=$(dirname "${BASH_SOURCE[0]}")
-eval "$(grep '^export JULIA_CPU_TARGET=' "$here"/precompile_slurm.sh)"
-(return 0 2>/dev/null) && return 0   # sourced: stop here
-exec julia --project="$here" "$@"
+# Run Julia in this project with the Slurm JULIA_CPU_TARGET:  ./julia_hpc.sh [julia args]
+# (for plain `julia` in your shell, `source hpc_env.sh` instead)
+source "$(dirname "${BASH_SOURCE[0]}")"/hpc_env.sh
+exec julia "$@"
