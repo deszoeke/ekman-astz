@@ -8,7 +8,20 @@
 
 Each script defines its groups of days (phases or pentads) and calls `composite(groups)`. Run locally with `julia --project -p N <script>.jl` on Julia 1.13. On the HPC use Slurm: `sbatch run_slurm.sh <script>.jl`. Inside a job (`SLURM_JOB_ID` set), each script calls `addprocs(SlurmManager())` to start one worker per Slurm task across the job's nodes. Only the main process loads SlurmClusterManager.
 
-HPC nodes differ in CPU: the head node is znver2, the compute nodes Sandy Bridge, and they share `~/.julia`. So everything is precompiled for both with one `JULIA_CPU_TARGET`, set in `precompile_slurm.sh` (`run_slurm.sh` reads it from there). Run `./precompile_slurm.sh` on the head node after package or EkmanCommon changes. Use `--clean` after changing the target, because Pkg's up-to-date check ignores the CPU target and keeps stale caches. That produced "Precompiled image … not available with flags". On the HPC outside Slurm, run `source hpc_env.sh` once per shell (then plain `julia` works), or start Julia with `./julia_hpc.sh [args]`. Never `source` the other .sh scripts. It sets the same `JULIA_CPU_TARGET`, so it reuses the Slurm caches. A different target (e.g. `haswell,-rdrnd` from `~/.bashrc`) builds a second cache, and crashes on the Sandy Bridge nodes. `pmap` gives each worker process whole groups, so there are no shared accumulators and no locks. Use processes, not threads, because NetCDF-C/HDF5 are not thread-safe.
+HPC nodes differ in CPU: the head node is znver2, the compute nodes Sandy Bridge, and they share `~/.julia`. So everything is precompiled for both with one `JULIA_CPU_TARGET`.
+
+`env.sh` is the only place the project sets environment variables (`JULIA_CPU_TARGET`, `JULIA_PROJECT`). `precompile.sh` and `run_slurm.sh` source it; in your own shell, `source env.sh` (only this file is sourced; run the others). A different target, e.g. `haswell,-rdrnd` from `~/.bashrc`, builds a second cache and crashes on the Sandy Bridge nodes.
+
+| To | Run |
+|---|---|
+| use the REPL | `source env.sh`, then `julia` |
+| run a script locally | `source env.sh`, then `julia -p N script.jl` |
+| rebuild caches after package or EkmanCommon changes (head node) | `./precompile.sh` |
+| run on Slurm | `sbatch run_slurm.sh script.jl` |
+
+Use `./precompile.sh --clean` after changing the target in `env.sh`: Pkg's up-to-date check ignores the CPU target and keeps stale caches, which gives "Precompiled image … not available with flags".
+
+`pmap` gives each worker process whole groups, so there are no shared accumulators and no locks. Use processes, not threads, because NetCDF-C/HDF5 are not thread-safe.
 
 Setup on a new machine: `julia --project -e 'using Pkg; Pkg.instantiate()'`. `Manifest.toml` is gitignored.
 
