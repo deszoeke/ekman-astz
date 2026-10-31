@@ -6,7 +6,7 @@
 
 `EkmanCommon/`: local package holding the code both scripts share: the physics, `daily_terms`, `composite` and `save_composite`. It's precompiled, with a PrecompileTools workload on a tiny synthetic grid, so workers load compiled code instead of recompiling it. Scripts load it with `@everywhere using EkmanCommon`. Editing its source triggers a recompile on the next load. Each script sets its own data root, `ceoasdir`, and passes `dir=era5dir(ceoasdir)`.
 
-Each script defines its groups of days (phases or pentads) and calls `composite(groups)`. Run locally with `julia --project -p N <script>.jl` on Julia 1.13. On the HPC use Slurm: `sbatch run_slurm.sh <script>.jl`. Inside a job (`SLURM_JOB_ID` set), each script calls `addprocs(SlurmManager())` to start one worker per Slurm task across the job's nodes. Only the main process loads SlurmClusterManager.
+Each script defines its helpers and groups of days (phases or pentads) as functions, and `main(; kw...)` calls `composite(groups)`, saves the file and returns `(comp, nobs, lon, lat, terms)`. `main()` runs only when the file is run as a script, not on `include`; `derived_terms(comp, lon, lat)` computes the enthalpy/MSE terms from a composite. Run locally with `julia --project -p N <script>.jl` on Julia 1.13. On the HPC use Slurm: `sbatch run_slurm.sh <script>.jl`. Inside a job (`SLURM_JOB_ID` set), each script calls `addprocs(SlurmManager())` to start one worker per Slurm task across the job's nodes. Only the main process loads SlurmClusterManager.
 
 HPC nodes differ in CPU: the head node is znver2, the compute nodes Sandy Bridge, and they share `~/.julia`. So everything is precompiled for both with one `JULIA_CPU_TARGET`.
 
@@ -16,6 +16,7 @@ HPC nodes differ in CPU: the head node is znver2, the compute nodes Sandy Bridge
 |---|---|
 | use the REPL | `source env.sh`, then `julia` |
 | run a script locally | `source env.sh`, then `julia -p N script.jl` |
+| test in the REPL | `source env.sh`, `julia`, `include("ekman_mse.jl")`; for workers `addprocs(4); @everywhere using EkmanCommon`; then e.g. `main(years=2012:2012, pentads=19:20)` |
 | rebuild caches after package or EkmanCommon changes (head node) | `./precompile.sh` |
 | run on Slurm | `sbatch run_slurm.sh script.jl` |
 
