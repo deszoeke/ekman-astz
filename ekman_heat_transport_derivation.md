@@ -180,3 +180,8 @@ The opposing Ekman transports drive differential advection in the ocean and atmo
 
 Midlatitude westerlies have the opposite effect. They drive equatorward Ekman cold advection in the ocean, and poleward warm advection in the atmosphere, stabilizing the sea-air temperature difference. The humidity enhances the ocean-atmosphere differential advection of thermal energy.
 
+## Literature Review
+
+Held et al. (2001) diagnose the large-scale mean advective heating by the frictional angular-momentum conserving flow in the tropical ocean and atmosphere, attributing it to Ekman convergence of heat in the atmosphere and Ekman divergence in the ocean. The subtropical cell and Pacific equatorial cold tongue complicates this view. The framework can be used to explain why more heat is exported poleward by the atmosphere in the tropics.
+
+Czaja and (2011)
