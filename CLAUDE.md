@@ -18,15 +18,20 @@ HPC nodes differ in CPU: the head node is znver2, the compute nodes Sandy Bridge
 | run a script locally | `source env.sh`, then `julia -p N script.jl` |
 | test in the REPL | `source env.sh`, `julia`, `include("ekman_mse.jl")`; for workers `addprocs(4); @everywhere using EkmanCommon`; then e.g. `main(years=2012:2012, pentads=19:20)` |
 | rebuild caches after package or EkmanCommon changes (head node) | `./precompile.sh` |
+| set up the Jupyter kernel on the HPC (once) | `./jupyter_kernel.sh`, then `./precompile.sh` |
 | run on Slurm | `sbatch run_slurm.sh script.jl` |
 
 Use `./precompile.sh --clean` after changing the target in `env.sh`: Pkg's up-to-date check ignores the CPU target and keeps stale caches, which gives "Precompiled image … not available with flags".
+
+On the HPC, every Julia that uses `~/.julia` must run with `env.sh`'s target. Cache file names don't include the target, so a Julia with a different target overwrites the shared caches (or fails to load them). Such a Julia is a JupyterHub kernel without the wrapper (native target), or a shell where `~/.bashrc` (monsoon-breeze `arch_env.sh`) sets `haswell,-rdrnd`. Symptoms: "not available with flags", or "Module X with build ID … is missing from the cache" and a recompile on every load. Fix: `./precompile.sh --clean`.
+
+Jupyter on the HPC (JupyterHub runs on node chen, znver4): `./jupyter_kernel.sh` once, then `./precompile.sh`. It installs the "Julia" kernel (`~/.local/share/jupyter/kernels/julia`), which runs `kernel.sh`; that sources `env.sh` and starts IJulia with `--project=@.`. Don't use IJulia's own `julia-1.x` kernels for this project.
 
 `pmap` gives each worker process whole groups, so there are no shared accumulators and no locks. Use processes, not threads, because NetCDF-C/HDF5 are not thread-safe.
 
 Setup on a new machine: `julia --project -e 'using Pkg; Pkg.instantiate()'`. `Manifest.toml` is gitignored.
 
-`plot/`: all plotting, with its own `plot/Project.toml` (PythonPlot, NCDatasets, Revise, IJulia, and EkmanCommon developed from `../EkmanCommon`) and CondaPkg in `plot/.CondaPkg`. Plots are made interactively in Jupyter notebooks, using the "Julia" kernel (`~/Library/Jupyter/kernels/julia`). It runs the juliaup launcher, so it follows Julia updates, with `--project=@.`, so it finds `plot/Project.toml`. Don't pin Julia versions in kernels or manifests; let Julia update, recompile and re-resolve manifests itself. Each notebook loads a plotting library with `using Revise; includet(...)`. Libraries hold plot defaults and reusable functions, and no top-level plotting. Notebooks keep the data being plotted in variables, and adjust appearance there. Plot code takes constants and analysis functions from EkmanCommon, not local copies; short formulas (e.g. m_a = c_pa T + Lv q) may be written out in library functions for readability.
+`plot/`: all plotting, with its own `plot/Project.toml` (PythonPlot, NCDatasets, Revise, IJulia, and EkmanCommon developed from `../EkmanCommon`) and CondaPkg in `plot/.CondaPkg`. Plots are made interactively in Jupyter notebooks, using the "Julia" kernel (`~/Library/Jupyter/kernels/julia` on the Mac; on the HPC, `kernel.sh`, see above). It runs the juliaup launcher, so it follows Julia updates, with `--project=@.`, so it finds `plot/Project.toml`. Don't pin Julia versions in kernels or manifests; let Julia update, recompile and re-resolve manifests itself. Each notebook loads a plotting library with `using Revise; includet(...)`. Libraries hold plot defaults and reusable functions, and no top-level plotting. Notebooks keep the data being plotted in variables, and adjust appearance there. Plot code takes constants and analysis functions from EkmanCommon, not local copies; short formulas (e.g. m_a = c_pa T + Lv q) may be written out in library functions for readability.
 - `ekman_V_ma_mo_plot.jl` (library), `ekman_plots.ipynb` (notebook): maps of group k of a composite NetCDF. M, m_a, m_o and their gradients come from the composite means (exact, since these are linear). The advection, s∇⋅M and flux-form terms come from the saved `adv_*`/`sdiv_*` composites of daily products. Each figure is a list of `panel`s passed to `plot_panels`.
 - `plot_bsiso_phase.jl` plots the phases in `BSISO_phase.txt`.
 

@@ -1,5 +1,5 @@
 #!/bin/bash
-# Precompile the project (packages and EkmanCommon) for every node type on the HPC:
+# Precompile the project (packages and EkmanCommon) and plot/ for every node type on the HPC:
 # the head node (znver2) and the Sandy Bridge compute nodes share ~/.julia, so the
 # caches must hold code for both. Run on the head node, in or next to the project, after
 # instantiating a new machine, changing packages, or editing EkmanCommon:
@@ -32,6 +32,8 @@ if $clean; then
 fi
 
 julia -e 'using Pkg; Pkg.instantiate(); Pkg.precompile()'
+# the plotting environment, which the Jupyter kernel (kernel.sh) uses
+(cd plot && JULIA_PROJECT=. julia -e 'using Pkg; Pkg.instantiate(); Pkg.precompile()')
 
 if $check; then
     # should print ok with no "Precompiling" messages
