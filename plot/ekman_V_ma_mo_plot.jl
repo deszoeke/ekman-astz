@@ -1,7 +1,7 @@
-# Maps of the Ekman mass transport (Mx, My), surface-air moist static energy m_a and
-# ocean-surface enthalpy m_o (h_o in the analysis code), from a composite NetCDF file
-# written by save_composite (ekman_mse.jl, ekman_mse_test.jl, bsiso_phase.jl); and of
-# the gradients of m_o and m_a and their Ekman advection -M⋅∇s; and of s ∇⋅M and the
+# Plotting library for composite NetCDF files written by save_composite (ekman_mse.jl,
+# ekman_mse_test.jl, bsiso_phase.jl): maps of the Ekman mass transport (Mx, My),
+# surface-air moist static energy m_a and ocean-surface enthalpy m_o (h_o in the analysis
+# code); the gradients of m_o and m_a and their Ekman advection -M⋅∇s; and s ∇⋅M and the
 # flux-form tendency -∇⋅(M s) = -M⋅∇s - s ∇⋅M. The ocean's transport is
 # M_o = M = (tauy, -taux)/f; the atmosphere's is equal and opposite, M_a = -M_o.
 # M, m_a, m_o and the gradients are linear in the composited fields, so computing them from
@@ -9,155 +9,178 @@
 # adv_* and sdiv_* composites of daily products (EkmanCommon.daily_terms), whose signs
 # already include M_a = -M_o, so they include the transient (eddy) transport.
 # -M⋅∇s > 0 is advection from higher s, a positive tendency (as adv = -M⋅∇ in ekman_mse.jl).
-# Runs in the plot/ environment, which has PythonPlot and NCDatasets, keeping them (and
-# CondaPkg's plot/.CondaPkg) out of the compositing project:
-#   julia --project=. ekman_V_ma_mo_plot.jl [file.nc] [index along the pentad/phase dimension, default 1]
-# Saves ekman_V_ma_mo_<file>_<index>.png, ekman_grad_adv_<file>_<index>.png and
-# ekman_sdiv_flux_<file>_<index>.png next to this script.
+#
+# Plots are made in ekman_plots.ipynb, which loads this file with Revise:
+#   using Revise; includet("ekman_V_ma_mo_plot.jl")
+# so edits here take effect in the notebook without restarting the kernel. Runs in the plot/
+# environment (PythonPlot, NCDatasets, Revise, IJulia, and EkmanCommon developed from
+# ../EkmanCommon), keeping PythonPlot (and CondaPkg's plot/.CondaPkg) out of the
+# compositing project.
 using NCDatasets
 using PythonPlot
+using EkmanCommon: c_pa, c_po, Lv, ekman_transport_xy, gradient
 
-# sans-serif text in the first of these fonts that is installed (not all systems have all),
-# and math ($...$: symbols, super/subscripts) in the same font; the few symbols it lacks,
-# e.g. ∇, come from STIX sans, bundled with matplotlib, rather than DejaVu Sans
-let rc = PythonPlot.matplotlib.rcParams
+"""
+    plot_defaults!(; fonts, dpi=100)
+
+Matplotlib defaults: sans-serif text in the first of `fonts` that is installed (not all
+systems have all), and math (\$...\$: symbols, super/subscripts) in the same font; the few
+symbols it lacks, e.g. ∇, come from STIX sans, bundled with matplotlib, rather than DejaVu Sans.
+"""
+function plot_defaults!(; fonts=["Liberation Sans", "Nimbus Sans", "Arial", "Helvetica", "Verdana"], dpi=100)
+    rc = PythonPlot.matplotlib.rcParams
     rc["font.family"] = "sans-serif"
-    rc["font.sans-serif"] = PythonPlot.PythonCall.pylist(["Liberation Sans", "Nimbus Sans", "Arial", "Helvetica", "Verdana"])
+    rc["font.sans-serif"] = PythonPlot.PythonCall.pylist(fonts)
     rc["mathtext.fontset"] = "custom"
     rc["mathtext.rm"], rc["mathtext.it"], rc["mathtext.bf"] = "sans", "sans:italic", "sans:bold"
     rc["mathtext.fallback"] = "stixsans"
+    rc["figure.dpi"] = dpi
+    nothing
 end
+plot_defaults!()
 
-file = get(ARGS, 1, "../ekman_pentad31_2020_test.nc")
-k    = parse(Int, get(ARGS, 2, "1"))
+## data
 
-# constants and Ekman transport as in EkmanCommon
-const c_pa = 1004.6  # J/kg/K specific heat of dry air at constant pressure
-const c_po = 3985.0  # J/kg/K specific heat of seawater
-const Lv   = 2.501e6 # J/kg latent heat of vaporization
-const Ω    = 7.292e-5 # rad/s Earth rotation rate
-const a    = 6.371e6  # m Earth radius
+const composite_vars = ("taux", "tauy", "sst", "t2", "q",
+                        "adv_sst", "adv_t2", "adv_q", "sdiv_sst", "sdiv_t2", "sdiv_q")
 
-"Ekman mass transport (Mx, My) = r (tauy, -taux)/f (kg/m/s), curtailed by r = 1 - exp(-y^2/Ro_rad^2) near the equator"
-function ekman_transport(taux, tauy, lat, Ro_rad)
-    f = 2Ω*sind(lat)
-    f == 0 && return (0.0*taux, 0.0*tauy)
-    r = -expm1(-(a*deg2rad(lat)/Ro_rad)^2)
-    (r*tauy/f, -r*taux/f)
-end
+"""
+    read_group(file, k; vars=composite_vars)
 
-"centered-difference gradient (∂φ/∂x, ∂φ/∂y) on the sphere of φ (lon x lat, global lon); NaN at the first/last latitude"
-function gradient(φ, lon, lat)
-    nx, ny = size(φ)
-    dφdx, dφdy = fill(NaN, nx, ny), fill(NaN, nx, ny)
-    for j in 1:ny, i in 1:nx
-        ip, im = mod1(i+1, nx), mod1(i-1, nx)
-        c = cosd(lat[j])
-        c > 1e-10 && (dφdx[i,j] = (φ[ip,j] - φ[im,j]) / (a*c*deg2rad(mod(lon[ip] - lon[im], 360))))
-        1 < j < ny && (dφdy[i,j] = (φ[i,j+1] - φ[i,j-1]) / (a*deg2rad(lat[j+1] - lat[j-1])))
+Composite fields at index k along the group (pentad/phase) dimension of a composite NetCDF
+file, as a NamedTuple: lon, lat, each of `vars` (lon x lat, Float64, NaN where missing),
+Ro_rad_m (the Ro_rad, m, the file was composited with), dim and dimval (the group dimension's
+name and value at k), file and k.
+"""
+function read_group(file, k; vars=composite_vars)
+    NCDataset(file; maskingvalue=NaN) do ds
+        dim = last(dimnames(ds["taux"]))
+        (; lon=ds["longitude"][:], lat=ds["latitude"][:],
+           (Symbol(v) => Float64.(ds[v][:, :, k]) for v in vars)...,
+           Ro_rad_m=ds.attrib["Ro_rad_m"], dim, dimval=ds[dim][k], file, k)
     end
-    dφdx, dφdy
 end
 
-vars = ("taux", "tauy", "sst", "t2", "q",
-        "adv_sst", "adv_t2", "adv_q", "sdiv_sst", "sdiv_t2", "sdiv_q")
-lon, lat, taux, tauy, sst, t2, q, adv_sst, adv_t2, adv_q, sdiv_sst, sdiv_t2, sdiv_q,
-    Ro_rad, dim, dimval = NCDataset(file; maskingvalue=NaN) do ds
-    dim = last(dimnames(ds["taux"]))
-    (ds["longitude"][:], ds["latitude"][:],
-     (Float64.(ds[v][:, :, k]) for v in vars)...,
-     ds.attrib["Ro_rad_m"], dim, ds[dim][k])
+"""
+    ekman_fields(d)
+
+Fields to plot from `d = read_group(file, k)`, as a NamedTuple (lon x lat arrays):
+Mx, My (kg/m/s), m_a, m_o (J/kg), their gradients dmodx, dmody, dmadx, dmady (J/kg/m),
+and, in W/m^2, Ekman advection adv_o, adv_a, s times transport divergence sdiv_o, sdiv_a,
+and flux-form tendency flux_o, flux_a; land (true where SST is NaN); and lon, lat.
+"""
+function ekman_fields(d)
+    Mx, My = ekman_transport_xy(d.taux, d.tauy, d.lat; Ro_rad=d.Ro_rad_m)
+    m_a = @. c_pa*d.t2 + Lv*d.q # J/kg, T in K
+    m_o = @. c_po*d.sst         # J/kg, SST in K
+    # gradients of the composite means
+    dmodx, dmody = gradient(m_o, d.lon, d.lat)
+    dmadx, dmady = gradient(m_a, d.lon, d.lat)
+    # from the saved composites of daily terms; the atmospheric ones already use M_a = -M
+    adv_o  = @. c_po*d.adv_sst               # -M_o⋅∇m_o
+    adv_a  = @. c_pa*d.adv_t2 + Lv*d.adv_q   # -M_a⋅∇m_a
+    sdiv_o = @. c_po*d.sdiv_sst              # m_o ∇⋅M_o
+    sdiv_a = @. c_pa*d.sdiv_t2 + Lv*d.sdiv_q # m_a ∇⋅M_a
+    flux_o = adv_o .- sdiv_o                 # -∇⋅(M_o m_o)
+    flux_a = adv_a .- sdiv_a                 # -∇⋅(M_a m_a)
+    land = isnan.(d.sst)
+    (; d.lon, d.lat, Mx, My, m_a, m_o, dmodx, dmody, dmadx, dmady,
+       adv_o, adv_a, sdiv_o, sdiv_a, flux_o, flux_a, land)
 end
 
-M  = ekman_transport.(taux, tauy, lat', Ro_rad)
-Mx, My = first.(M), last.(M)
-m_a = @. c_pa*t2 + Lv*q # J/kg, T in K
-m_o = @. c_po*sst       # J/kg, SST in K
+"x with NaN where land is true"
+mask(x, land) = ifelse.(land, NaN, x)
 
-# gradients (J/kg/m) of the composite means
-dmodx, dmody = gradient(m_o, lon, lat)
-dmadx, dmady = gradient(m_a, lon, lat)
-# Ekman advection, s times transport divergence, and flux-form tendency (W/m^2), from the
-# saved composites of daily terms; the atmospheric ones already use M_a = -M
-adv_o  = @. c_po*adv_sst                # -M_o⋅∇m_o
-adv_a  = @. c_pa*adv_t2 + Lv*adv_q      # -M_a⋅∇m_a
-sdiv_o = @. c_po*sdiv_sst               # m_o ∇⋅M_o
-sdiv_a = @. c_pa*sdiv_t2 + Lv*sdiv_q    # m_a ∇⋅M_a
-flux_o = adv_o .- sdiv_o                # -∇⋅(M_o m_o)
-flux_a = adv_a .- sdiv_a                # -∇⋅(M_a m_a)
-
-# land mask from the NaN SST, applied to every panel
-land = isnan.(sst)
-mask(x) = ifelse.(land, NaN, x)
-
-"symmetric color limit: the 98th percentile of |x| over finite points"
-function symlim(x)
+"symmetric color limit: the p quantile of |x| over finite points"
+function symlim(x; p=0.98)
     v = sort(abs.(filter(isfinite, vec(x))))
-    isempty(v) ? 1.0 : v[max(1, round(Int, 0.98*length(v)))]
+    isempty(v) ? 1.0 : v[max(1, round(Int, p*length(v)))]
 end
 
-fig, axs = subplots(2, 2, figsize=(14, 7), sharex=true, sharey=true, layout="constrained")
-panels = [(mask(Mx), raw"Ekman transport $M_x$", raw"kg m$^{-1}$ s$^{-1}$", "RdBu_r", true),
-          (mask(My), raw"Ekman transport $M_y$", raw"kg m$^{-1}$ s$^{-1}$", "RdBu_r", true),
-          (mask(m_a ./ 1e3), raw"surface air MSE $m_a = c_{pa} T_2 + L_v q$", raw"kJ kg$^{-1}$", "viridis", false),
-          (mask(m_o ./ 1e3), raw"ocean surface enthalpy $m_o = c_{po}$ SST", raw"kJ kg$^{-1}$", "viridis", false)]
-# axs is a Python array of axes, indexed from 0 as axs[row, col]
-for (n, (x, title, units, cmap, diverging)) in enumerate(panels)
-    ax = axs[(n-1) ÷ 2, (n-1) % 2]
-    lims = diverging ? (-symlim(x), symlim(x)) : extrema(filter(isfinite, x))
-    # x is lon x lat; pcolormesh takes (rows=lat, cols=lon)
-    pc = ax.pcolormesh(lon, lat, permutedims(x), cmap=cmap, vmin=lims[1], vmax=lims[2], shading="nearest")
-    colorbar(pc, ax=ax, label=units)
-    ax.set_title(title)
-    (n-1) % 2 == 0 && ax.set_ylabel("latitude")
-    (n-1) ÷ 2 == 1 && ax.set_xlabel("longitude")
+## panels and figures
+
+"""
+    panel(x, title, units; cmap="RdBu_r", lims=nothing)
+
+A map panel of x (lon x lat). Color limits `lims`: nothing for ±symlim(x), a number l for
+±l, :extrema for the finite range of x, or a (vmin, vmax) tuple. Change one in a list with
+e.g. `panels[3] = merge(panels[3], (; cmap="magma"))`.
+"""
+panel(x, title, units; cmap="RdBu_r", lims=nothing) = (; x, title, units, cmap, lims)
+
+"(vmin, vmax) for x from a panel's lims"
+colorlims(x, ::Nothing) = (l = symlim(x); (-l, l))
+colorlims(_, lims::Real) = (-lims, lims)
+colorlims(_, lims::Tuple) = lims
+colorlims(x, lims::Symbol) = lims == :extrema ? extrema(filter(isfinite, x)) : error("lims = $lims")
+
+"""
+    plot_panels(lon, lat, panels; ncols=2, land=nothing, suptitle="", figsize=(7ncols, 3.5nrows))
+
+Map each panel in a grid with ncols columns, sharing axes, with land (if given) masked.
+Returns (fig, axs); axs is a Python array of axes indexed from 0 as axs[row, col].
+"""
+function plot_panels(lon, lat, panels; ncols=2, land=nothing, suptitle="",
+                     figsize=(7ncols, 3.5cld(length(panels), ncols)))
+    nrows = cld(length(panels), ncols)
+    fig, axs = subplots(nrows, ncols; figsize, sharex=true, sharey=true, layout="constrained", squeeze=false)
+    for (n, p) in enumerate(panels)
+        row, col = divrem(n-1, ncols)
+        ax = axs[row, col]
+        x = isnothing(land) ? p.x : mask(p.x, land)
+        vmin, vmax = colorlims(x, p.lims)
+        # x is lon x lat; pcolormesh takes (rows=lat, cols=lon)
+        pc = ax.pcolormesh(lon, lat, permutedims(x); cmap=p.cmap, vmin, vmax, shading="nearest")
+        colorbar(pc; ax, label=p.units)
+        ax.set_title(p.title)
+        col == 0 && ax.set_ylabel("latitude")
+        row == nrows-1 && ax.set_xlabel("longitude")
+    end
+    for n in length(panels)+1:nrows*ncols # hide unused axes
+        row, col = divrem(n-1, ncols)
+        axs[row, col].set_visible(false)
+    end
+    fig.suptitle(suptitle)
+    fig, axs
 end
-fig.suptitle("$(basename(file)): $dim $dimval (Ro_rad = $(Ro_rad/1e3) km)")
 
-out = joinpath(@__DIR__, "ekman_V_ma_mo_$(splitext(basename(file))[1])_$k.png")
-savefig(out, dpi=150)
-println("saved $out")
+"title for the group in d = read_group(file, k)"
+grouptitle(d) = "$(basename(d.file)): $(d.dim) $(d.dimval) (Ro_rad = $(d.Ro_rad_m/1e3) km)"
 
-# gradients and Ekman advection; columns: ocean, atmosphere; rows: ∂/∂x, ∂/∂y, -M⋅∇; gradients per km.
-# color limits ±lim, or ±symlim(x) where lim is nothing; both advection panels share ±180 W/m^2
-fig, axs = subplots(3, 2, figsize=(14, 10), sharex=true, sharey=true, layout="constrained")
-panels = [(mask(1e3dmodx), raw"$\partial m_o/\partial x$", raw"J kg$^{-1}$ km$^{-1}$", nothing), (mask(1e3dmadx), raw"$\partial m_a/\partial x$", raw"J kg$^{-1}$ km$^{-1}$", nothing),
-          (mask(1e3dmody), raw"$\partial m_o/\partial y$", raw"J kg$^{-1}$ km$^{-1}$", nothing), (mask(1e3dmady), raw"$\partial m_a/\partial y$", raw"J kg$^{-1}$ km$^{-1}$", nothing),
-          (mask(adv_o), raw"ocean Ekman advection $-M_o \cdot \nabla m_o$", raw"W m$^{-2}$", 180),
-          (mask(adv_a), raw"atmosphere Ekman advection $-M_a \cdot \nabla m_a$, $M_a = -M_o$", raw"W m$^{-2}$", 180)]
-for (n, (x, title, units, lim)) in enumerate(panels)
-    row, col = (n-1) ÷ 2, (n-1) % 2
-    ax = axs[row, col]
-    l = something(lim, symlim(x))
-    pc = ax.pcolormesh(lon, lat, permutedims(x), cmap="RdBu_r", vmin=-l, vmax=l, shading="nearest")
-    colorbar(pc, ax=ax, label=units)
-    ax.set_title(title)
-    col == 0 && ax.set_ylabel("latitude")
-    row == 2 && ax.set_xlabel("longitude")
+const flux_units = raw"W m$^{-2}$"
+const grad_units = raw"J kg$^{-1}$ km$^{-1}$"
+
+"Ekman transport, surface-air MSE and ocean-surface enthalpy panels"
+transport_mse_panels(f) = [
+    panel(f.Mx, raw"Ekman transport $M_x$", raw"kg m$^{-1}$ s$^{-1}$"),
+    panel(f.My, raw"Ekman transport $M_y$", raw"kg m$^{-1}$ s$^{-1}$"),
+    panel(f.m_a ./ 1e3, raw"surface air MSE $m_a = c_{pa} T_2 + L_v q$", raw"kJ kg$^{-1}$"; cmap="viridis", lims=:extrema),
+    panel(f.m_o ./ 1e3, raw"ocean surface enthalpy $m_o = c_{po}$ SST", raw"kJ kg$^{-1}$"; cmap="viridis", lims=:extrema)]
+
+"gradient (per km) and Ekman advection panels; columns: ocean, atmosphere; both advection panels share ±advlim"
+grad_adv_panels(f; advlim=180) = [
+    panel(1e3f.dmodx, raw"$\partial m_o/\partial x$", grad_units), panel(1e3f.dmadx, raw"$\partial m_a/\partial x$", grad_units),
+    panel(1e3f.dmody, raw"$\partial m_o/\partial y$", grad_units), panel(1e3f.dmady, raw"$\partial m_a/\partial y$", grad_units),
+    panel(f.adv_o, raw"ocean Ekman advection $-M_o \cdot \nabla m_o$", flux_units; lims=advlim),
+    panel(f.adv_a, raw"atmosphere Ekman advection $-M_a \cdot \nabla m_a$, $M_a = -M_o$", flux_units; lims=advlim)]
+
+"""
+s times transport divergence and flux-form tendency panels; columns: ocean, atmosphere.
+m is measured from 0 K, so m ∇⋅M is large and nearly cancels in the flux form; limits ±symlim(x).
+"""
+sdiv_flux_panels(f) = [
+    panel(f.sdiv_o, raw"ocean $m_o \nabla \cdot M_o$", flux_units),
+    panel(f.sdiv_a, raw"atmosphere $m_a \nabla \cdot M_a$", flux_units),
+    panel(f.flux_o, raw"ocean flux form $-\nabla \cdot (M_o m_o)$", flux_units),
+    panel(f.flux_a, raw"atmosphere flux form $-\nabla \cdot (M_a m_a)$", flux_units)]
+
+"""
+    savepng(fig, name, d; dir=@__DIR__, dpi=150)
+
+Save fig as <dir>/<name>_<file>_<k>.png for d = read_group(file, k); returns the path.
+"""
+function savepng(fig, name, d; dir=@__DIR__, dpi=150)
+    out = joinpath(dir, "$(name)_$(splitext(basename(d.file))[1])_$(d.k).png")
+    fig.savefig(out; dpi)
+    out
 end
-fig.suptitle("$(basename(file)): $dim $dimval (Ro_rad = $(Ro_rad/1e3) km)")
-
-out = joinpath(@__DIR__, "ekman_grad_adv_$(splitext(basename(file))[1])_$k.png")
-savefig(out, dpi=150)
-println("saved $out")
-
-# s times transport divergence and the flux-form tendency; columns: ocean, atmosphere.
-# m is measured from 0 K, so m ∇⋅M is large and nearly cancels in the flux form; limits ±symlim(x)
-fig, axs = subplots(2, 2, figsize=(14, 7), sharex=true, sharey=true, layout="constrained")
-panels = [(mask(sdiv_o), raw"ocean $m_o \nabla \cdot M_o$"), (mask(sdiv_a), raw"atmosphere $m_a \nabla \cdot M_a$"),
-          (mask(flux_o), raw"ocean flux form $-\nabla \cdot (M_o m_o)$"), (mask(flux_a), raw"atmosphere flux form $-\nabla \cdot (M_a m_a)$")]
-for (n, (x, title)) in enumerate(panels)
-    row, col = (n-1) ÷ 2, (n-1) % 2
-    ax = axs[row, col]
-    l = symlim(x)
-    pc = ax.pcolormesh(lon, lat, permutedims(x), cmap="RdBu_r", vmin=-l, vmax=l, shading="nearest")
-    colorbar(pc, ax=ax, label=raw"W m$^{-2}$")
-    ax.set_title(title)
-    col == 0 && ax.set_ylabel("latitude")
-    row == 1 && ax.set_xlabel("longitude")
-end
-fig.suptitle("$(basename(file)): $dim $dimval (Ro_rad = $(Ro_rad/1e3) km)")
-
-out = joinpath(@__DIR__, "ekman_sdiv_flux_$(splitext(basename(file))[1])_$k.png")
-savefig(out, dpi=150)
-println("saved $out")

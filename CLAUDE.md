@@ -26,8 +26,8 @@ Use `./precompile.sh --clean` after changing the target in `env.sh`: Pkg's up-to
 
 Setup on a new machine: `julia --project -e 'using Pkg; Pkg.instantiate()'`. `Manifest.toml` is gitignored.
 
-`plot/`: all plotting, with its own `plot/Project.toml` (PythonPlot, NCDatasets) and CondaPkg in `plot/.CondaPkg`. Run from `plot/`, e.g. `julia --project=. ekman_V_ma_mo_plot.jl ../file.nc k`.
-- `ekman_V_ma_mo_plot.jl` maps group k of a composite NetCDF: M, m_a, m_o and their gradients, from the composite means (exact, since these are linear); and the advection, s∇⋅M and flux-form terms from the saved `adv_*`/`sdiv_*` composites of daily products.
+`plot/`: all plotting, with its own `plot/Project.toml` (PythonPlot, NCDatasets, Revise, IJulia, and EkmanCommon developed from `../EkmanCommon`) and CondaPkg in `plot/.CondaPkg`. Plots are made interactively in Jupyter notebooks, using the "Julia 1.13" kernel (`--project=@.`, so it finds `plot/Project.toml`). Each notebook loads a plotting library with `using Revise; includet(...)`. Libraries hold plot defaults and reusable functions, and no top-level plotting. Notebooks keep the data being plotted in variables, and adjust appearance there. Plot code takes constants and analysis functions from EkmanCommon, not local copies; short formulas (e.g. m_a = c_pa T + Lv q) may be written out in library functions for readability.
+- `ekman_V_ma_mo_plot.jl` (library), `ekman_plots.ipynb` (notebook): maps of group k of a composite NetCDF. M, m_a, m_o and their gradients come from the composite means (exact, since these are linear). The advection, s∇⋅M and flux-form terms come from the saved `adv_*`/`sdiv_*` composites of daily products. Each figure is a list of `panel`s passed to `plot_panels`.
 - `plot_bsiso_phase.jl` plots the phases in `BSISO_phase.txt`.
 
 Keep PythonPlot out of the project and out of the compositing scripts. Otherwise every worker process loads PythonPlot and CondaPkg, and they recompile and collide on CondaPkg's lock files.

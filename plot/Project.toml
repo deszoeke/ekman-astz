@@ -1,5 +1,11 @@
 [deps]
 Downloads = "f43a241f-c20a-4ad4-852c-f6b1247861c6"
+EkmanCommon = "82dea841-1f81-4c2c-8606-796509fb38ae"
+IJulia = "7073ff75-c697-5162-941a-fcdaad2a7d2a"
 NCDatasets = "85f8d34a-cbdd-5861-8df4-14fed0d494ab"
 PythonPlot = "274fc56d-3b97-40fa-a1cd-1b4a50311bf9"
+Revise = "295af30f-e4ad-537b-8983-00126c2a3abe"
 UnicodePlots = "b8865327-cd53-5732-bb35-84acbb429228"
+
+[sources]
+EkmanCommon = {path = "../EkmanCommon"}
