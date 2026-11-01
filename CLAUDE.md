@@ -28,6 +28,12 @@ Setup on a new machine: `julia --project -e 'using Pkg; Pkg.instantiate()'`. `Ma
 
 `plots.jl`: all plotting. It reads outputs (e.g. `BSISO_phase.txt`) and runs in the default environment, which has PythonPlot: `julia plots.jl`, without `--project`. Keep PythonPlot out of the project and out of the compositing scripts. Otherwise every worker process loads PythonPlot and CondaPkg, and they recompile and collide on CondaPkg's lock files.
 
+## Who reads code
+The main session runs on Opus (`.claude/settings.json`).
+- **File and line already known:** read them directly with `sed` or `grep`; keep it short.
+- **Anything else** (finding code, tracing calls, summarizing `.jl` files or variables, reading large files): send it to the `code-reader` agent (Sonnet, read-only, `.claude/agents/code-reader.md`). It reports facts with file:line references.
+- **Judgment calls, planning, editing and writing code** stay with the main session. Don't give them to `code-reader`.
+
 ## Status
 - Tested only on synthetic ERA5-format files; not yet run on real data.
 - `rdadir` (NCAR RDA d633000 path for the iews/inss wind stress) is a placeholder relative path; point it at the real copy.
