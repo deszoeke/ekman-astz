@@ -147,32 +147,9 @@ end
 "title for the group in d = read_group(file, k)"
 grouptitle(d) = "$(basename(d.file)): $(d.dim) $(d.dimval) (Ro_rad = $(d.Ro_rad_m/1e3) km)"
 
+# unit labels for panels
 const flux_units = raw"W m$^{-2}$"
 const grad_units = raw"J kg$^{-1}$ km$^{-1}$"
-
-"Ekman transport, surface-air MSE and ocean-surface enthalpy panels"
-transport_mse_panels(f) = [
-    panel(f.Mx, raw"Ekman transport $M_x$", raw"kg m$^{-1}$ s$^{-1}$"),
-    panel(f.My, raw"Ekman transport $M_y$", raw"kg m$^{-1}$ s$^{-1}$"),
-    panel(f.m_a ./ 1e3, raw"surface air MSE $m_a = c_{pa} T_2 + L_v q$", raw"kJ kg$^{-1}$"; cmap="viridis", lims=:extrema),
-    panel(f.m_o ./ 1e3, raw"ocean surface enthalpy $m_o = c_{po}$ SST", raw"kJ kg$^{-1}$"; cmap="viridis", lims=:extrema)]
-
-"gradient (per km) and Ekman advection panels; columns: ocean, atmosphere; both advection panels share ±advlim"
-grad_adv_panels(f; advlim=180) = [
-    panel(1e3f.dmodx, raw"$\partial m_o/\partial x$", grad_units), panel(1e3f.dmadx, raw"$\partial m_a/\partial x$", grad_units),
-    panel(1e3f.dmody, raw"$\partial m_o/\partial y$", grad_units), panel(1e3f.dmady, raw"$\partial m_a/\partial y$", grad_units),
-    panel(f.adv_o, raw"ocean Ekman advection $-M_o \cdot \nabla m_o$", flux_units; lims=advlim),
-    panel(f.adv_a, raw"atmosphere Ekman advection $-M_a \cdot \nabla m_a$, $M_a = -M_o$", flux_units; lims=advlim)]
-
-"""
-s times transport divergence and flux-form tendency panels; columns: ocean, atmosphere.
-m is measured from 0 K, so m ∇⋅M is large and nearly cancels in the flux form; limits ±symlim(x).
-"""
-sdiv_flux_panels(f) = [
-    panel(f.sdiv_o, raw"ocean $m_o \nabla \cdot M_o$", flux_units),
-    panel(f.sdiv_a, raw"atmosphere $m_a \nabla \cdot M_a$", flux_units),
-    panel(f.flux_o, raw"ocean flux form $-\nabla \cdot (M_o m_o)$", flux_units),
-    panel(f.flux_a, raw"atmosphere flux form $-\nabla \cdot (M_a m_a)$", flux_units)]
 
 """
     savepng(fig, name, d; dir=@__DIR__, dpi=150)
