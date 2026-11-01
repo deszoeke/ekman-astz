@@ -26,7 +26,11 @@ Use `./precompile.sh --clean` after changing the target in `env.sh`: Pkg's up-to
 
 Setup on a new machine: `julia --project -e 'using Pkg; Pkg.instantiate()'`. `Manifest.toml` is gitignored.
 
-`plots.jl`: all plotting. It reads outputs (e.g. `BSISO_phase.txt`) and runs in the default environment, which has PythonPlot: `julia plots.jl`, without `--project`. Keep PythonPlot out of the project and out of the compositing scripts. Otherwise every worker process loads PythonPlot and CondaPkg, and they recompile and collide on CondaPkg's lock files.
+`plot/`: all plotting, with its own `plot/Project.toml` (PythonPlot, NCDatasets) and CondaPkg in `plot/.CondaPkg`. Run from `plot/`, e.g. `julia --project=. ekman_V_ma_mo_plot.jl ../file.nc k`.
+- `ekman_V_ma_mo_plot.jl` maps group k of a composite NetCDF: M, m_a, m_o and their gradients, from the composite means (exact, since these are linear); and the advection, s∇⋅M and flux-form terms from the saved `adv_*`/`sdiv_*` composites of daily products.
+- `plot_bsiso_phase.jl` plots the phases in `BSISO_phase.txt`.
+
+Keep PythonPlot out of the project and out of the compositing scripts. Otherwise every worker process loads PythonPlot and CondaPkg, and they recompile and collide on CondaPkg's lock files.
 
 ## Who reads code
 The main session runs on Opus (`.claude/settings.json`).
