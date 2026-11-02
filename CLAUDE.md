@@ -8,34 +8,20 @@
 
 Each script defines its helpers and groups of days (phases or pentads) as functions, and `main(; kw...)` calls `composite(groups)`, saves the file and returns `(comp, nobs, lon, lat, terms)`. `main()` runs only when the file is run as a script, not on `include`; `derived_terms(comp, lon, lat)` computes the enthalpy/MSE terms from a composite. Run locally with `julia --project -p N <script>.jl` on Julia 1.13. On the HPC use Slurm: `sbatch run_slurm.sh <script>.jl`. Inside a job (`SLURM_JOB_ID` set), each script calls `addprocs(SlurmManager())` to start one worker per Slurm task across the job's nodes. Only the main process loads SlurmClusterManager.
 
-### Julia settings on the HPC
-The project sets no environment variables. Julia settings are user-level, in `~/.config/julia/arch_env.sh` (one copy). `~/.bashrc`, `precompile.sh`, `run_slurm.sh` and the Jupyter kernel launcher source it. For each architecture it sets the depot, the juliaup directory and the CPU target:
-- x86_64 (Sandy Bridge compute nodes, znver2 head node, znver4 chen): depot `~/.julia`, target `sandybridge,-xsaveopt,clone_all;haswell,-rdrnd,base(0);x86-64-v4,-rdrnd,base(0)`, one string for all x86_64 nodes.
-- aarch64 (GH200): depot `~/.julia-aarch64`, target unset (native; one CPU type).
-
-How targets and caches work (Julia 1.13 `base/loading.jl`):
-- A cache file's name hashes the target string with the project path, binary and flags (`compilecache_path`, ~3353). So different target strings, or different projects, never share a file.
-- An unset target hashes as "native", the same name on every CPU. Native builds on different nodes overwrite each other.
-- At load, Julia accepts any cache whose clones run on this CPU, whatever its target string. So a cache built with another target can satisfy `Pkg.precompile` on one node and fail on another.
-- Rule: never leave the target unset on x86_64, and use one string.
-
-monsoon-breeze still uses its own `helpers/arch_env.sh` (`haswell,-rdrnd`) for its jobs. Its caches are separate (different project path).
+### Julia on the HPC
+Julia settings (depot, juliaup, CPU target per architecture) are user-level, in `~/.config/julia/arch_env.sh`, sourced by `~/.bashrc`, `precompile.sh`, `run_slurm.sh` and the Jupyter kernel launcher. The project sets no environment variables. Targets, caches, kernels and the don'ts are in the user-level `hpc-julia` skill.
 
 | To | Run |
 |---|---|
 | use the REPL | `julia --project` (in the repo) |
 | run a script locally | `julia --project -p N script.jl` |
 | test in the REPL | `julia --project`, `include("ekman_mse.jl")`; for workers `addprocs(4); @everywhere using EkmanCommon`; then e.g. `main(years=2012:2012, pentads=19:20)` |
-| rebuild caches after package or EkmanCommon changes | `sbatch precompile.sh` (project and `plot/`; never on the head node: its per-process limits, 8 GB virtual memory (`ulimit -v`) and 300 s CPU time (`ulimit -t`), make compiles segfault or get killed) |
+| rebuild caches after package or EkmanCommon changes | `sbatch precompile.sh` (project and `plot/`; never on the head node) |
 | run on Slurm | `sbatch run_slurm.sh script.jl` |
 
-Workers get the project from Distributed/SlurmManager, which pass `JULIA_PROJECT` = the active project.
+Jupyter on the HPC: kernel "Julia" (`~/.local/share/jupyter/kernels/julia/`, user-level).
 
-Run one precompile at a time, never while Jupyter kernels are compiling. Never `rm -rf ~/.julia/compiled/...` while any Julia is running: it deletes every project's caches, and open files leave `.nfs*` placeholders.
-
-Jupyter on the HPC (JupyterHub on chen): kernel "Julia", `~/.local/share/jupyter/kernels/julia/` (user-level, not in this repo). Its `kernel.json` runs `kernel.sh` in the same directory, which sources `~/.config/julia/arch_env.sh` and starts IJulia with `--project=@.`. IJulia's own `julia-1.x` kernels set no target (native); they are deleted, and `IJULIA_NODEFAULTKERNEL=1` in `arch_env.sh` stops IJulia's build from recreating them.
-
-When something recompiles or fails to load: `./check_julia.sh` (read-only, any node; from a notebook, `run(\`bash <repo>/check_julia.sh\`)`). It prints the node, its limits, the Julia environment variables, every kernel spec, and which packages of the project and `plot/` would recompile on this node.
+When something recompiles or fails to load: `./check_julia.sh` (read-only, any node).
 
 `pmap` gives each worker process whole groups, so there are no shared accumulators and no locks. Use processes, not threads, because NetCDF-C/HDF5 are not thread-safe.
 

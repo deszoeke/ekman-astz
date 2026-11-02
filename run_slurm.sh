@@ -24,7 +24,7 @@ cd "$SLURM_SUBMIT_DIR"
 # precompile.sh used
 source ~/.config/julia/arch_env.sh
 
-# precompile ahead of time with ./precompile.sh on the head node; this only loads the
+# precompile ahead of time with sbatch precompile.sh; this only loads the
 # cache (or builds anything stale, once, before any worker starts)
 julia --project=. -e 'using EkmanCommon, SlurmClusterManager'
 
