@@ -50,17 +50,21 @@ const composite_vars = ("taux", "tauy", "sst", "t2", "q", "adv_sst", "adv_t2", "
                         "sst_taux", "sst_tauy", "t2_taux", "t2_tauy", "q_taux", "q_tauy")
 
 """
-    read_group(file, k; vars=composite_vars)
+    read_group(file, k; vars=composite_vars, lonlim=nothing, latlim=nothing)
 
 Composite fields at index k along the group (pentad/phase) dimension of a composite NetCDF
 file, as a NamedTuple: lon, lat, each of `vars` (lon x lat, Float64, NaN where missing),
-dim and dimval (the group dimension's name and value at k), file and k.
+dim and dimval (the group dimension's name and value at k), file and k. `lonlim`, `latlim`
+(degrees, e.g. (40, 110), (-5, 30)) read only that region from the file.
 """
-function read_group(file, k; vars=composite_vars)
+function read_group(file, k; vars=composite_vars, lonlim=nothing, latlim=nothing)
     NCDataset(file; maskingvalue=NaN) do ds
         dim = last(dimnames(ds["taux"]))
-        (; lon=ds["longitude"][:], lat=ds["latitude"][:],
-           (Symbol(v) => Float64.(ds[v][:, :, k]) for v in vars)...,
+        inlim(x, lim) = isnothing(lim) ? (1:length(x)) : (r = findall(v -> lim[1] <= v <= lim[2], x); first(r):last(r))
+        i = inlim(ds["longitude"][:], lonlim)
+        j = inlim(ds["latitude"][:], latlim)
+        (; lon=ds["longitude"][i], lat=ds["latitude"][j],
+           (Symbol(v) => Float64.(ds[v][i, j, k]) for v in vars)...,
            dim, dimval=ds[dim][k], file, k)
     end
 end
