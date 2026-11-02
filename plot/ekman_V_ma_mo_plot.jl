@@ -28,19 +28,26 @@ using EkmanCommon: c_pa, c_po, Lv, curtail, ekman_transport_xy, gradient, diverg
 """
     plot_defaults!(; fonts, dpi=100)
 
-Matplotlib defaults: sans-serif text in the first of `fonts` that is installed (not all
-systems have all), and math (\$...\$: symbols, super/subscripts) in the same font; the few
-symbols it lacks, e.g. ∇, come from STIX sans, bundled with matplotlib, rather than DejaVu Sans.
+Matplotlib defaults: sans-serif text in those of `fonts` that matplotlib already has in its
+font list (not all systems have all), else its default, DejaVu Sans; math (\$...\$: symbols,
+super/subscripts) in the same font; the few symbols it lacks, e.g. ∇, come from STIX sans,
+bundled with matplotlib. Fonts not in the list are never requested: a missing font can make
+matplotlib search all of the system's fonts, which hangs for minutes on the HPC.
+Returns the fonts used.
 """
 function plot_defaults!(; fonts=["Liberation Sans", "Nimbus Sans", "Arial", "Helvetica", "Verdana"], dpi=100)
     rc = PythonPlot.matplotlib.rcParams
-    rc["font.family"] = "sans-serif"
-    rc["font.sans-serif"] = PythonPlot.PythonCall.pylist(fonts)
-    rc["mathtext.fontset"] = "custom"
-    rc["mathtext.rm"], rc["mathtext.it"], rc["mathtext.bf"] = "sans", "sans:italic", "sans:bold"
-    rc["mathtext.fallback"] = "stixsans"
+    known = Set(PythonPlot.PythonCall.pyconvert(String, f.name) for f in PythonPlot.matplotlib.font_manager.fontManager.ttflist)
+    use = filter(in(known), fonts)
+    if !isempty(use)
+        rc["font.family"] = "sans-serif"
+        rc["font.sans-serif"] = PythonPlot.PythonCall.pylist(use)
+        rc["mathtext.fontset"] = "custom"
+        rc["mathtext.rm"], rc["mathtext.it"], rc["mathtext.bf"] = "sans", "sans:italic", "sans:bold"
+        rc["mathtext.fallback"] = "stixsans"
+    end
     rc["figure.dpi"] = dpi
-    nothing
+    isempty(use) ? ["DejaVu Sans (default)"] : use
 end
 plot_defaults!()
 
