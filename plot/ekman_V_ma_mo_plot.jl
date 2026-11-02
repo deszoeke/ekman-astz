@@ -61,7 +61,8 @@ const composite_vars = ("taux", "tauy", "sst", "t2", "q", "adv_sst", "adv_t2", "
 
 Composite fields at index k along the group (pentad/phase) dimension of a composite NetCDF
 file, as a NamedTuple: lon, lat, each of `vars` (lon x lat, Float64, NaN where missing),
-dim and dimval (the group dimension's name and value at k), file and k. `lonlim`, `latlim`
+dim and dimval (the group dimension's name and value at k), file and k. With a range k,
+e.g. 1:8, each variable is lon x lat x group, indexed d.taux[:, :, q]. `lonlim`, `latlim`
 (degrees, e.g. (40, 110), (-5, 30)) read only that region from the file.
 """
 function read_group(file, k; vars=composite_vars, lonlim=nothing, latlim=nothing)
