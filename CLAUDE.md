@@ -33,7 +33,9 @@ Workers get the project from Distributed/SlurmManager, which pass `JULIA_PROJECT
 
 Run one precompile at a time, never while Jupyter kernels are compiling. Never `rm -rf ~/.julia/compiled/...` while any Julia is running: it deletes every project's caches, and open files leave `.nfs*` placeholders.
 
-Jupyter on the HPC (JupyterHub on chen): kernel "Julia", `~/.local/share/jupyter/kernels/julia/` (user-level, not in this repo). Its `kernel.json` runs `kernel.sh` in the same directory, which sources `~/.config/julia/arch_env.sh` and starts IJulia with `--project=@.`. IJulia's own `julia-1.x` kernels set no target (native); don't use them.
+Jupyter on the HPC (JupyterHub on chen): kernel "Julia", `~/.local/share/jupyter/kernels/julia/` (user-level, not in this repo). Its `kernel.json` runs `kernel.sh` in the same directory, which sources `~/.config/julia/arch_env.sh` and starts IJulia with `--project=@.`. IJulia's own `julia-1.x` kernels set no target (native); they are deleted, and `IJULIA_NODEFAULTKERNEL=1` in `arch_env.sh` stops IJulia's build from recreating them.
+
+When something recompiles or fails to load: `./check_julia.sh` (read-only, any node; from a notebook, `run(\`bash <repo>/check_julia.sh\`)`). It prints the node, its limits, the Julia environment variables, every kernel spec, and which packages of the project and `plot/` would recompile on this node.
 
 `pmap` gives each worker process whole groups, so there are no shared accumulators and no locks. Use processes, not threads, because NetCDF-C/HDF5 are not thread-safe.
 
