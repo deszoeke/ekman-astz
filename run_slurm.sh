@@ -14,8 +14,9 @@
 #SBATCH --partition=ceoas
 ##SBATCH --account=...
 # --mem=32G is the allowance per node. Estimated need for ekman_mse.jl (25 pentads):
-# ~1 GB per worker, plus ~9 GB for the main process on the first node, which collects
-# and stacks all the composites: ~18 GB on the first node, ~9 GB on the others.
+# ~2.2 GB per worker (~1 GB, plus ~1.2 GB of netCDF chunk cache, EkmanCommon.chunk_cache),
+# plus ~9 GB for the main process on the first node, which collects and stacks all the
+# composites: ~29 GB on the first node, ~20 GB on the others.
 
 set -euo pipefail
 script=${1:-ekman_mse.jl}

@@ -13,7 +13,7 @@ using Distributed
 using NCDatasets
 using PrecompileTools
 
-export era5dir, era5code, era5file, daily_terms, composite_mean, composite, save_composite,
+export era5dir, era5code, era5file, month_files, month_blocks, chunk_cache, daily_terms, composite_mean, composite, save_composite,
        fieldkeys, nlkeys, keys_all, scalars, c_pa, c_po, Lv, esat_buck, qsat_dew,
        coriolis, curtail, ekman_transport, ekman_transport_xy, gradient, divergence, advection,
        dailymean, accumulate!
@@ -49,6 +49,21 @@ function era5file(dir, code, d)
     end
 end
 
+# netCDF chunk cache (bytes) per file: one time-span of chunks, so that consecutive days
+# reuse decompressed chunks instead of reading them again. Chunks (time, lat, lon): sst
+# (124, 121, 240), ~520 MB per 124 h; RDA stress, t2, d2 (27, 139, 277), ~150 MB per 27 h.
+const chunk_cache = (taux=160_000_000, tauy=160_000_000, sst=550_000_000,
+                     t2=160_000_000, d2=160_000_000)
+
+"the month's ERA5 files (NamedTuple like `dir`) for the month containing date d"
+month_files(d; dir=era5dir(), code=era5code) = map((dk, ck) -> era5file(dk, ck, d), dir, code)
+
+"sorted `days` split into vectors of consecutive days in the same month"
+function month_blocks(days)
+    ds = sort(collect(days))
+    [filter(d -> firstdayofmonth(d) == m, ds) for m in unique(firstdayofmonth.(ds))]
+end
+
 "the data variable in an RDA file (the only variable with 3 dimensions)"
 datavar(ds) = first(k for k in keys(ds) if ndims(ds[k]) == 3)
 
@@ -59,20 +74,24 @@ timevar(ds) = haskey(ds, "valid_time") ? "valid_time" : "time"
 asrange(idx) = !isempty(idx) && idx == first(idx):last(idx) ? (first(idx):last(idx)) : idx
 
 """
-    withdatasets(f, files)
+    withdatasets(f, files; cache=nothing)
 
 Open each file in the NamedTuple `files` (fill values read as NaN), call `f` on the
 NamedTuple of datasets, and close them all afterwards, like `NCDataset(file) do ds`
-for several files. Files opened before a failure are closed too.
+for several files. Files opened before a failure are closed too. `cache`, a NamedTuple
+with the keys of `files`, gives each file's netCDF chunk cache size in bytes.
 """
-function withdatasets(f, files::NamedTuple)
+function withdatasets(f, files::NamedTuple; cache=nothing)
     opened = NCDataset[]
+    default = NCDatasets.get_chunk_cache()
     try
-        for file in files
+        for (k, file) in pairs(files)
+            isnothing(cache) || NCDatasets.set_chunk_cache(size=cache[k]) # for files opened next
             push!(opened, NCDataset(file; maskingvalue=NaN))
         end
         f(NamedTuple{keys(files)}(Tuple(opened)))
     finally
+        isnothing(cache) || NCDatasets.set_chunk_cache(size=default[1])
         foreach(close, opened)
     end
 end
@@ -229,36 +248,24 @@ function accumulate!(S, N, x)
 end
 
 """
-    daily_terms(d, lon, lat; dir=era5dir(), code=era5code, scalars=scalars)
+    daily_terms(ds, times, d, lon, lat; scalars=scalars)
 
 Daily means (lon x lat) on date d of the ERA5 fields, q from hourly dewpoint, and the
 nonlinear Ekman terms computed from them (uncurtailed M), as a NamedTuple with keys `keys_all`.
-Returns nothing, with a warning, if the files or hours for d are missing.
+`ds` are the month's open datasets (see `withdatasets`) and `times` their dates, one per hour.
+Returns nothing, with a warning, if hours for d are missing.
 """
-function daily_terms(d, lon, lat; dir=era5dir(), code=era5code, scalars=scalars)
-    files = map((dk, ck) -> era5file(dk, ck, d), dir, code)
-    if !all(isfile, files)
-        @warn "missing ERA5 files for $d" filter(!isfile, collect(files))
+function daily_terms(ds, times, d, lon, lat; scalars=scalars)
+    it = map(t -> asrange(findall(==(d), t)), times)
+    if any(isempty, it)
+        @warn "missing hours on $d"
         return nothing
     end
-    x = withdatasets(files) do ds
-        # every source must be on the stress grid (sst and t2/d2 come from a different archive)
-        for (k, f) in pairs(ds)
-            f["latitude"][:] ≈ lat && f["longitude"][:] ≈ lon ||
-                error("$k grid in $(files[k]) differs from the stress grid")
-        end
-        it = map(f -> asrange(findall(==(d), Date.(f[timevar(f)][:]))), ds) # sst: valid_time
-        if any(isempty, it)
-            @warn "missing hours on $d"
-            return nothing
-        end
-        # average hourly data to daily; q from hourly dewpoint, then daily mean
-        hours(k) = ds[k][datavar(ds[k])][:, :, it[k]]
-        hd2 = hours(:d2)
-        (taux=dailymean(hours(:taux)), tauy=dailymean(hours(:tauy)), sst=dailymean(hours(:sst)),
+    # average hourly data to daily; q from hourly dewpoint, then daily mean
+    hours(k) = ds[k][datavar(ds[k])][:, :, it[k]]
+    hd2 = hours(:d2)
+    x = (taux=dailymean(hours(:taux)), tauy=dailymean(hours(:tauy)), sst=dailymean(hours(:sst)),
          t2=dailymean(hours(:t2)), d2=dailymean(hd2), q=dailymean(hd2, qsat_dew))
-    end
-    isnothing(x) && return nothing
     # daily Ekman transport (uncurtailed; Inf at f = 0) and its divergence
     Mx, My = ekman_transport_xy(x.taux, x.tauy, lat)
     divM = divergence(Mx, My, lon, lat)
@@ -273,19 +280,37 @@ function daily_terms(d, lon, lat; dir=era5dir(), code=era5code, scalars=scalars)
 end
 
 """
-    composite_mean(days, lon, lat; progress=nothing, kw...)
+    composite_mean(days, lon, lat; progress=nothing, dir=era5dir(), code=era5code, scalars=scalars)
 
-Mean over `days` of the finite daily values (see `daily_terms`, which takes `kw`).
-Returns (mean, nobs), NamedTuples of lon x lat arrays; the mean is NaN where nobs is 0.
-If `progress` is a channel, put 1 on it as each day finishes.
+Mean over `days` of the finite daily values (see `daily_terms`). The days are read a month
+at a time: each month's files are opened once, with a chunk cache (`chunk_cache`), and its
+days read from them in order. Returns (mean, nobs), NamedTuples of lon x lat arrays; the
+mean is NaN where nobs is 0. If `progress` is a channel, put 1 on it as each day finishes.
 """
-function composite_mean(days, lon, lat; progress=nothing, kw...)
+function composite_mean(days, lon, lat; progress=nothing, dir=era5dir(), code=era5code, scalars=scalars)
     S = NamedTuple{keys_all}(Tuple(zeros(length(lon), length(lat)) for k in keys_all))
     N = NamedTuple{keys_all}(Tuple(zeros(Int16, length(lon), length(lat)) for k in keys_all))
-    for d in days
-        x = daily_terms(d, lon, lat; kw...)
-        isnothing(x) || foreach(accumulate!, S, N, x)
-        isnothing(progress) || put!(progress, 1)
+    done(n) = isnothing(progress) || foreach(_ -> put!(progress, 1), 1:n)
+    for mdays in month_blocks(days)
+        files = month_files(first(mdays); dir, code)
+        if !all(isfile, files)
+            @warn "missing ERA5 files for $(Dates.format(first(mdays), "yyyy-mm")) ($(length(mdays)) days)" filter(!isfile, collect(files))
+            done(length(mdays))
+            continue
+        end
+        withdatasets(files; cache=chunk_cache) do ds
+            # every source must be on the stress grid (sst and t2/d2 come from a different archive)
+            for (k, f) in pairs(ds)
+                f["latitude"][:] ≈ lat && f["longitude"][:] ≈ lon ||
+                    error("$k grid in $(files[k]) differs from the stress grid")
+            end
+            times = map(f -> Date.(f[timevar(f)][:]), ds) # sst: valid_time
+            for d in mdays
+                x = daily_terms(ds, times, d, lon, lat; scalars)
+                isnothing(x) || foreach(accumulate!, S, N, x)
+                done(1)
+            end
+        end
     end
     map((s, n) -> s ./ n, S, N), N
 end
