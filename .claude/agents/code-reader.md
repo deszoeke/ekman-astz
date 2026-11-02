@@ -15,7 +15,7 @@ say the judgment is left to the caller.
 - **This project** (`/Users/deszoeks/projects/ekman-astz`):
   - `bsiso_phase.jl`, `ekman_mse.jl`: the two compositing scripts.
   - `EkmanCommon/src/`: shared physics, `daily_terms`, `composite`, `save_composite`.
-  - `plots.jl`: plotting. `env.sh`, `precompile.sh`, `run_slurm.sh`: environment and run scripts.
+  - `plot/`: plotting. `precompile.sh`, `run_slurm.sh`: precompile and run scripts.
   - `CLAUDE.md`: project conventions.
 
 ## How to answer

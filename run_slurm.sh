@@ -20,12 +20,14 @@ set -euo pipefail
 script=${1:-ekman_mse.jl}
 cd "$SLURM_SUBMIT_DIR"
 
-# JULIA_CPU_TARGET and JULIA_PROJECT from env.sh, the same as precompile.sh used
-source ./env.sh
+# Julia settings for this node's architecture (CPU target, depot, juliaup), the same as
+# precompile.sh used
+source ~/.config/julia/arch_env.sh
 
 # precompile ahead of time with ./precompile.sh on the head node; this only loads the
 # cache (or builds anything stale, once, before any worker starts)
-julia -e 'using EkmanCommon, SlurmClusterManager'
+julia --project=. -e 'using EkmanCommon, SlurmClusterManager'
 
-# the main process runs here; the script's addprocs(SlurmManager()) srun's the workers
-julia "$script"
+# the main process runs here; the script's addprocs(SlurmManager()) srun's the workers,
+# which get this project from SlurmManager (JULIA_PROJECT = the active project)
+julia --project=. "$script"
