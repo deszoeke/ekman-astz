@@ -71,8 +71,9 @@ end
 Fields to plot from `d = read_group(file, k)`, with the Ekman transport curtailed within
 ~`Ro_rad` (m) of the equator by r = curtail(lat, Ro_rad), as a NamedTuple (lon x lat arrays):
 Mx, My (kg/m/s), m_a, m_o (J/kg), their gradients dmodx, dmody, dmadx, dmady (J/kg/m),
-and, in W/m^2, Ekman advection adv_o, adv_a, s times transport divergence sdiv_o, sdiv_a,
-and flux-form tendency flux_o, flux_a; r; land (true where SST is NaN); and lon, lat.
+Ekman advection of temperature advT_o (SST), advT_a (t2) in K kg/m^2/s, and, in W/m^2,
+Ekman advection adv_o, adv_a, s times transport divergence sdiv_o, sdiv_a, and flux-form
+tendency flux_o, flux_a; r; land (true where SST is NaN); and lon, lat.
 """
 function ekman_fields(d; Ro_rad)
     r  = curtail.(d.lat', Ro_rad)
@@ -86,6 +87,8 @@ function ekman_fields(d; Ro_rad)
     # -r M⋅∇s from the saved composites of daily terms; the atmospheric ones already use M_a = -M
     adv_o = rx(c_po*d.adv_sst)              # -M_o⋅∇m_o
     adv_a = rx(c_pa*d.adv_t2 + Lv*d.adv_q)  # -M_a⋅∇m_a
+    advT_o = rx(d.adv_sst)                  # -M_o⋅∇SST
+    advT_a = rx(d.adv_t2)                   # -M_a⋅∇t2
     # flux form -∇⋅(r M s), with r M s = ekman_transport of the composite s τ
     fluxdiv(staux, stauy) = divergence(ekman_transport_xy(staux, stauy, d.lat; Ro_rad)..., d.lon, d.lat)
     flux_o = -c_po*fluxdiv(d.sst_taux, d.sst_tauy)                                # -∇⋅(M_o m_o)
@@ -94,7 +97,7 @@ function ekman_fields(d; Ro_rad)
     sdiv_a = adv_a - flux_a                                                       # m_a ∇⋅M_a
     land = isnan.(d.sst)
     (; d.lon, d.lat, Mx, My, m_a, m_o, dmodx, dmody, dmadx, dmady,
-       adv_o, adv_a, sdiv_o, sdiv_a, flux_o, flux_a, r, land)
+       advT_o, advT_a, adv_o, adv_a, sdiv_o, sdiv_a, flux_o, flux_a, r, land)
 end
 
 "x with NaN where land is true"
@@ -151,3 +154,4 @@ end
 # unit labels for panels
 const flux_units = raw"W m$^{-2}$"
 const grad_units = raw"J kg$^{-1}$ km$^{-1}$"
+const advT_units = raw"K kg m$^{-2}$ s$^{-1}$"
