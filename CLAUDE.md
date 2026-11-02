@@ -26,7 +26,7 @@ monsoon-breeze still uses its own `helpers/arch_env.sh` (`haswell,-rdrnd`) for i
 | use the REPL | `julia --project` (in the repo) |
 | run a script locally | `julia --project -p N script.jl` |
 | test in the REPL | `julia --project`, `include("ekman_mse.jl")`; for workers `addprocs(4); @everywhere using EkmanCommon`; then e.g. `main(years=2012:2012, pentads=19:20)` |
-| rebuild caches after package or EkmanCommon changes (head node) | `./precompile.sh` (project and `plot/`) |
+| rebuild caches after package or EkmanCommon changes | `sbatch precompile.sh` (project and `plot/`; never on the head node: its per-process limits, 8 GB virtual memory (`ulimit -v`) and 300 s CPU time (`ulimit -t`), make compiles segfault or get killed) |
 | run on Slurm | `sbatch run_slurm.sh script.jl` |
 
 Workers get the project from Distributed/SlurmManager, which pass `JULIA_PROJECT` = the active project.
