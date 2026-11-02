@@ -50,10 +50,10 @@ phase_days(phaselookup, days) = [filter(d -> get(phaselookup, d, 0) == p, days) 
 """
     main(; days, ampmin, ceoasdir, indexfile)
 
-Composite by BSISO1 phase over `days` (default 2012-2025; 2026 is incomplete), save the NetCDF
+Composite by BSISO1 phase over `days` (default 2012-2020; the ERA5 data stop at 2020), save the NetCDF
 file, and return (comp, nobs, lon, lat).
 """
-function main(; days=Date(2012,1,1):Day(1):Date(2025,12,31), ampmin=1.0,
+function main(; days=Date(2012,1,1):Day(1):Date(2020,12,31), ampmin=1.0,
                 ceoasdir=ceoasdir, indexfile="data/BSISO.INDEX.NORM.LY.data")
     phaselookup = bsiso_phases(indexfile; ampmin)
     comp, nobs, lon, lat = composite(phase_days(phaselookup, days); dir=era5dir(ceoasdir))

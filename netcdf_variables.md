@@ -46,7 +46,7 @@ Notes on M and the signs:
 
 ## bsiso_phase.jl
 
-File name: `ekman_bsiso1_phase_<firstyear>-<lastyear>.nc`, e.g. `ekman_bsiso1_phase_2012-2025.nc`. It is written to the current directory and uses the years of `first(days)` and `last(days)`.
+File name: `ekman_bsiso1_phase_<firstyear>-<lastyear>.nc`, e.g. `ekman_bsiso1_phase_2012-2020.nc`. It is written to the current directory and uses the years of `first(days)` and `last(days)`.
 
 The group coordinate is `phase`, with values 1:8.
 
