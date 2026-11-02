@@ -13,8 +13,9 @@
 #SBATCH --output=%x-%j.out
 #SBATCH --partition=ceoas
 ##SBATCH --account=...
-# --mem is per node: ~1 GB per worker, plus ~6 GB on the first node for the main
-# process, which collects and stacks all the composites.
+# --mem=32G is the allowance per node. Estimated need for ekman_mse.jl (25 pentads):
+# ~1 GB per worker, plus ~9 GB for the main process on the first node, which collects
+# and stacks all the composites: ~18 GB on the first node, ~9 GB on the others.
 
 set -euo pipefail
 script=${1:-ekman_mse.jl}
