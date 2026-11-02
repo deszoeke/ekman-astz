@@ -4,7 +4,7 @@ Both scripts write through `save_composite` in `EkmanCommon/src/EkmanCommon.jl`,
 
 Dimension order is (longitude, latitude, dim) as written from Julia. Tools that read the C order, such as `ncdump`, show it reversed.
 
-Not saved: the `terms` from `derived_terms` (`adv_h_o`, `m_a`, `Mx`, `divM`, and the rest). `main()` returns them but never writes them to the file. Only `comp` and `nobs` are saved.
+Only `comp` and `nobs` are saved. Derived quantities (M, m_a, m_o, gradients, enthalpy fluxes) are computed from them in `plot/`.
 
 ## Common to both files
 

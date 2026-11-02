@@ -100,19 +100,14 @@ end
 ## panels and figures
 
 """
-    panel(x, title, units; cmap="RdBu_r", lims=nothing)
+    panel(x, title, units; cmap="RdBu_r", kw...)
 
-A map panel of x (lon x lat). Color limits `lims`: nothing for ±symlim(x), a number l for
-±l, :extrema for the finite range of x, or a (vmin, vmax) tuple. Change one in a list with
-e.g. `panels[3] = merge(panels[3], (; cmap="magma"))`.
+A map panel of x (lon x lat). `kw` are passed to pcolormesh, e.g. `vmin=-180, vmax=180`;
+with neither vmin nor vmax the color limits are ±symlim of the plotted (land-masked) x, and
+`vmin=nothing, vmax=nothing` lets matplotlib scale to the data. Change one in a list with
+e.g. `panels[3] = panel(f.m_a, "m_a", "J/kg"; cmap="magma")`.
 """
-panel(x, title, units; cmap="RdBu_r", lims=nothing) = (; x, title, units, cmap, lims)
-
-"(vmin, vmax) for x from a panel's lims"
-colorlims(x, ::Nothing) = (l = symlim(x); (-l, l))
-colorlims(_, lims::Real) = (-lims, lims)
-colorlims(_, lims::Tuple) = lims
-colorlims(x, lims::Symbol) = lims == :extrema ? extrema(filter(isfinite, x)) : error("lims = $lims")
+panel(x, title, units; cmap="RdBu_r", kw...) = (; x, title, units, cmap, kw=NamedTuple(kw))
 
 """
     plot_panels(lon, lat, panels; ncols=2, land=nothing, suptitle="", figsize=(7ncols, 3.5nrows))
@@ -128,9 +123,9 @@ function plot_panels(lon, lat, panels; ncols=2, land=nothing, suptitle="",
         row, col = divrem(n-1, ncols)
         ax = axs[row, col]
         x = isnothing(land) ? p.x : mask(p.x, land)
-        vmin, vmax = colorlims(x, p.lims)
+        lims = haskey(p.kw, :vmin) || haskey(p.kw, :vmax) ? (;) : (l = symlim(x); (vmin=-l, vmax=l))
         # x is lon x lat; pcolormesh takes (rows=lat, cols=lon)
-        pc = ax.pcolormesh(lon, lat, permutedims(x); cmap=p.cmap, vmin, vmax, shading="nearest")
+        pc = ax.pcolormesh(lon, lat, permutedims(x); cmap=p.cmap, shading="nearest", lims..., p.kw...)
         colorbar(pc; ax, label=p.units)
         ax.set_title(p.title)
         col == 0 && ax.set_ylabel("latitude")
@@ -144,20 +139,6 @@ function plot_panels(lon, lat, panels; ncols=2, land=nothing, suptitle="",
     fig, axs
 end
 
-"title for the group in d = read_group(file, k)"
-grouptitle(d) = "$(basename(d.file)): $(d.dim) $(d.dimval) (Ro_rad = $(d.Ro_rad_m/1e3) km)"
-
 # unit labels for panels
 const flux_units = raw"W m$^{-2}$"
 const grad_units = raw"J kg$^{-1}$ km$^{-1}$"
-
-"""
-    savepng(fig, name, d; dir=@__DIR__, dpi=150)
-
-Save fig as <dir>/<name>_<file>_<k>.png for d = read_group(file, k); returns the path.
-"""
-function savepng(fig, name, d; dir=@__DIR__, dpi=150)
-    out = joinpath(dir, "$(name)_$(splitext(basename(d.file))[1])_$(d.k).png")
-    fig.savefig(out; dpi)
-    out
-end

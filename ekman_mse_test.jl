@@ -1,20 +1,14 @@
 # Tester for ekman_mse.jl: the mean of a single pentad in a single year, the pentad
-# containing 2023-06-04 (pentad 31, May 31 - Jun 4, which spans two monthly files).
+# containing 2020-06-04 (pentad 31, May 31 - Jun 4, which spans two monthly files).
 # One group, so no workers are needed:  julia --project ekman_mse_test.jl
-using Dates
-using EkmanCommon
-
-ceoasdir = "./data"
-
-"pentad (1-73) of date d, on the 365-day calendar (Feb 29 joins pentad 12)"
-pentad(d) = (dayofyear(d) - (isleapyear(d) && month(d) > 2) - 1) ÷ 5 + 1
+include("ekman_mse.jl") # pentad, pentaddays, pentad_climatology, ceoasdir; main() does not run
 
 d0 = Date(2020, 6, 4)
 p  = pentad(d0)
-days = filter(d -> pentad(d) == p, Date(year(d0),1,1):Day(1):Date(year(d0),12,31))
+days = pentaddays(year(d0), p:p)
 println("pentad $p of $(year(d0)): $(first(days)) to $(last(days))")
 
-t = @elapsed (comp, nobs, lon, lat) = composite([days]; dir=era5dir(ceoasdir))
+t = @elapsed (comp, nobs, lon, lat) = pentad_climatology(year(d0):year(d0), p:p; dir=era5dir(ceoasdir))
 println("composited $(length(days)) days on a $(length(lon))x$(length(lat)) grid in $(round(t, digits=1)) s")
 
 # summary of each field: finite points, range and mean, and the range of its daily counts
