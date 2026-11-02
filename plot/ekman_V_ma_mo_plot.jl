@@ -134,26 +134,46 @@ e.g. `panels[3] = panel(f.m_a, "m_a", "J/kg"; cmap="magma")`.
 panel(x, title, units; cmap="RdBu_r", kw...) = (; x, title, units, cmap, kw=NamedTuple(kw))
 
 """
+    map_panel!(ax, lon, lat, p; land=nothing)
+
+Draw panel `p` (see `panel`) on matplotlib axis `ax`: a pcolormesh map of p.x (lon x lat),
+land (if given) masked, colorbar with p.units, title p.title. Color limits from p.kw, else
+±symlim of the masked x. Returns (pc, cb), the mesh and the colorbar, for further changes,
+e.g. `cb.ax.tick_params(labelsize=8)`. Use it in a notebook's own loop over its own axes:
+    fig, axs = subplots(4, 2; figsize=(12, 14), sharex=true, sharey=true, layout="compressed", squeeze=false)
+    for (p, ax) in zip(panels, axs.flat); map_panel!(ax, lon, lat, p; land); end
+"""
+function map_panel!(ax, lon, lat, p; land=nothing)
+    x = isnothing(land) ? p.x : mask(p.x, land)
+    lims = haskey(p.kw, :vmin) || haskey(p.kw, :vmax) ? (;) : (l = symlim(x); (vmin=-l, vmax=l))
+    # x is lon x lat; pcolormesh takes (rows=lat, cols=lon)
+    pc = ax.pcolormesh(lon, lat, permutedims(x); cmap=p.cmap, shading="nearest", lims..., p.kw...)
+    cb = colorbar(pc; ax, label=p.units)
+    ax.set_title(p.title)
+    pc, cb
+end
+
+"""
     plot_panels(lon, lat, panels; ncols=2, land=nothing, suptitle="", figsize=(7ncols, 3.5nrows))
 
-Map each panel in a grid with ncols columns, sharing axes, with land (if given) masked.
-Returns (fig, axs); axs is a Python array of axes indexed from 0 as axs[row, col].
+Map each panel with `map_panel!` in a grid with ncols columns, sharing axes, with land (if
+given) masked, latitude labels on the first column and longitude labels on the last row.
+Returns (fig, axs, pcs, cbs); axs is a Python array of axes indexed from 0 as axs[row, col],
+pcs and cbs the meshes and colorbars in panel order (`fig, axs = plot_panels(...)` also works).
 The "compressed" layout keeps colorbars as tall as their maps, also after e.g.
-`for ax in axs.flat; ax.set_aspect(1); end`.
+`for ax in axs.flat; ax.set_aspect(1); end`. For other layouts, make the axes yourself and
+call `map_panel!` (see there).
 """
 function plot_panels(lon, lat, panels; ncols=2, land=nothing, suptitle="",
                      figsize=(7ncols, 3.5cld(length(panels), ncols)))
     nrows = cld(length(panels), ncols)
     fig, axs = subplots(nrows, ncols; figsize, sharex=true, sharey=true, layout="compressed", squeeze=false)
+    pcs, cbs = [], []
     for (n, p) in enumerate(panels)
         row, col = divrem(n-1, ncols)
         ax = axs[row, col]
-        x = isnothing(land) ? p.x : mask(p.x, land)
-        lims = haskey(p.kw, :vmin) || haskey(p.kw, :vmax) ? (;) : (l = symlim(x); (vmin=-l, vmax=l))
-        # x is lon x lat; pcolormesh takes (rows=lat, cols=lon)
-        pc = ax.pcolormesh(lon, lat, permutedims(x); cmap=p.cmap, shading="nearest", lims..., p.kw...)
-        colorbar(pc; ax, label=p.units)
-        ax.set_title(p.title)
+        pc, cb = map_panel!(ax, lon, lat, p; land)
+        push!(pcs, pc); push!(cbs, cb)
         col == 0 && ax.set_ylabel("latitude")
         row == nrows-1 && ax.set_xlabel("longitude")
     end
@@ -162,7 +182,7 @@ function plot_panels(lon, lat, panels; ncols=2, land=nothing, suptitle="",
         axs[row, col].set_visible(false)
     end
     fig.suptitle(suptitle)
-    fig, axs
+    fig, axs, pcs, cbs
 end
 
 # unit labels for panels
