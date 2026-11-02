@@ -43,11 +43,11 @@ The main session runs on Opus (`.claude/settings.json`).
 - Tested only on synthetic ERA5-format files; not yet run on real data.
 - `rdadir` (NCAR RDA d633000 path for the iews/inss wind stress) is a placeholder relative path; point it at the real copy.
 - SST, t2m and d2m come from `/storage/ceoas-datasets/datasets/ERA5/staging/andrea/1hr/SFC/{sst,t2m,d2m}`.
-- `Ro_rad = 250e3` m (equatorial curtailment of the stress) is a placeholder, not a derived value.
+- Compositing uses the uncurtailed Ekman transport. The equatorial curtailment r = `curtail(lat, Ro_rad)` = 1 − exp(−y²/Ro_rad²) depends only on latitude, so it is applied in postprocessing (`ekman_fields(d; Ro_rad)`; the notebook sets `Ro_rad = 250e3` m, an ad hoc plotting choice). Results should not depend on it; it matters only within ~5° of the equator.
 
 ## Conventions
 - Ocean Ekman mass transport is M = (τy, −τx)/f; the atmosphere's is −M. Signs in `scalars` encode this.
-- Nonlinear terms (`adv_s`, `sdiv_s` for s in sst, t2, q) are computed from DAILY means inside the loop, then composited. The flux-form tendency is `adv_s − sdiv_s`.
+- Nonlinear terms (`adv_s`, `sdiv_s`, `s_taux`, `s_tauy` for s in sst, t2, q) are computed from DAILY means inside the loop, then composited. The flux-form tendency is `adv_s − sdiv_s` = −∇⋅(±M s), with M s = (s_tauy, −s_taux)/f.
 - q is computed from HOURLY dewpoint (Buck 1981, p = 1000 hPa), then averaged to daily.
 - m_a and h_o use temperatures in K, i.e. measured from 0 K.
 - BSISO composites use only active days, where BSISO1 amplitude √(PC1² + PC2²) > `ampmin` = 1. Index days with fill values (−999.9, e.g. 2015-06-21) are missing: they get phase 0 in `BSISO_phase.txt` and are never composited.

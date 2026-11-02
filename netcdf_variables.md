@@ -8,7 +8,7 @@ Only `comp` and `nobs` are saved. Derived quantities (M, m_a, m_o, gradients, en
 
 ## Common to both files
 
-File attributes: `Ro_rad_m` (the value of `Ro_rad`, 250e3 m), `history` (`"<now()> <basename(PROGRAM_FILE)>"`; the script name is empty if run from the REPL), plus the script-specific ones below.
+File attributes: `history` (`"<now()> <basename(PROGRAM_FILE)>"`; the script name is empty if run from the REPL), plus the script-specific ones below.
 
 Every composite field is Float32 with `_FillValue` = NaN. It is the mean of the finite daily values at each grid point. It is NaN where the count is 0, for example SST over land.
 
@@ -31,12 +31,15 @@ Every `nobs_<k>` is Int16, with `long_name` "number of daily values in the mean 
 | sdiv_sst | (longitude, latitude, dim) | K kg m-2 s-1. +1 × sst·∇·M |
 | sdiv_t2 | (longitude, latitude, dim) | K kg m-2 s-1. −1 × t2·∇·M |
 | sdiv_q | (longitude, latitude, dim) | kg m-2 s-1. −1 × q·∇·M |
-| nobs_taux, nobs_tauy, nobs_sst, nobs_t2, nobs_d2, nobs_q, nobs_adv_sst, nobs_adv_t2, nobs_adv_q, nobs_sdiv_sst, nobs_sdiv_t2, nobs_sdiv_q | (longitude, latitude, dim) | Int16 count of finite daily values in the mean of the matching field, at each grid point |
+| sst_taux, sst_tauy | (longitude, latitude, dim) | K N m-2. sst × taux, sst × tauy (no sign), from daily means. The flux sst·M = (sst_tauy, −sst_taux)/f |
+| t2_taux, t2_tauy | (longitude, latitude, dim) | K N m-2. t2 × taux, t2 × tauy |
+| q_taux, q_tauy | (longitude, latitude, dim) | N m-2. q × taux, q × tauy |
+| nobs_taux, nobs_tauy, nobs_sst, nobs_t2, nobs_d2, nobs_q, nobs_adv_sst, nobs_adv_t2, nobs_adv_q, nobs_sdiv_sst, nobs_sdiv_t2, nobs_sdiv_q, nobs_sst_taux, … nobs_q_tauy | (longitude, latitude, dim) | Int16 count of finite daily values in the mean of the matching field, at each grid point |
 
 Notes on M and the signs:
 
-- M = (Mx, My) = (r·tauy/f, −r·taux/f), the ocean Ekman mass transport in kg m-1 s-1. Here r = 1 − exp(−y²/Ro_rad²), which curtails the stress near the equator.
-- At f = 0, M is set to 0.
+- M = (Mx, My) = (tauy/f, −taux/f), the ocean Ekman mass transport in kg m-1 s-1, NOT curtailed at the equator. At f = 0 it is infinite, so the adv and sdiv terms there (and sdiv on the neighboring rows) are not finite and drop out of the means (nobs = 0, value NaN).
+- Curtailment r = 1 − exp(−y²/Ro_rad²) depends only on latitude, so it is applied after compositing (`ekman_fields(d; Ro_rad)` in `plot/`): r·adv, −∇⋅(r M s) from the s·τ composites, and s∇⋅(rM) = r·adv + ∇⋅(r M s).
 - The code comment says the flux-form tendency is `adv_s − sdiv_s`.
 - The `units` strings are hard-coded in `save_composite`. For adv and sdiv they follow from M in kg m-1 s-1 times the units of s.
 - Gradients and divergence are centered differences on the sphere. They are NaN at the first and last latitude. They are also NaN across longitude unless the grid is global (`isglobal`).

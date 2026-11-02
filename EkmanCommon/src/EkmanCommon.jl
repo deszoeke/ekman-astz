@@ -14,8 +14,8 @@ using NCDatasets
 using PrecompileTools
 
 export era5dir, era5code, era5file, daily_terms, composite_mean, composite, save_composite,
-       fieldkeys, nlkeys, keys_all, scalars, Ro_rad, c_pa, c_po, Lv, esat_buck, qsat_dew,
-       coriolis, ekman_transport, ekman_transport_xy, gradient, divergence, advection,
+       fieldkeys, nlkeys, keys_all, scalars, c_pa, c_po, Lv, esat_buck, qsat_dew,
+       coriolis, curtail, ekman_transport, ekman_transport_xy, gradient, divergence, advection,
        dailymean, accumulate!
 
 # ERA5 hourly surface analysis from NCAR RDA d633000, one file per variable per month:
@@ -115,12 +115,20 @@ const a = 6.371e6  # m Earth radius
 coriolis(lat) = 2Ω*sind(lat)
 
 """
+    curtail(lat, Ro_rad)
+
+Equatorial curtailment factor r = 1 - exp(-y^2/Ro_rad^2) at latitude lat (degrees), with
+y the distance (m) from the equator: 0 at the equator, > 0.99 poleward of ~2.2 Ro_rad.
+Depends only on latitude, so it can be applied to composites after compositing.
+"""
+curtail(lat, Ro_rad) = -expm1(-(a*deg2rad(lat)/Ro_rad)^2)
+
+"""
     ekman_transport(taux, tauy, lat; Ro_rad=nothing)
 
 Ekman mass transport (Mx, My) = (tauy, -taux)/f (kg/m/s) from wind stress (N/m^2)
 at latitude lat (degrees). If Ro_rad (m) is given, curtail the effective stress
-near the equator by 1 - exp(-y^2/Ro_rad^2), with y the distance (m) from the
-equator, to account for the pressure gradient balancing the wind stress and keep
+near the equator by `curtail(lat, Ro_rad)` to account for the pressure gradient balancing the wind stress and keep
 the transport finite (-> 0 at the equator). Without Ro_rad the transport is
 infinite (NaN for zero stress) at the equator.
 """
@@ -129,9 +137,8 @@ function ekman_transport(taux, tauy, lat; Ro_rad=nothing)
     if isnothing(Ro_rad)
         r = 1.0
     else
-        y = a*deg2rad(lat)
         f == 0 && return (0.0*taux, 0.0*tauy) # limit of r/f ~ y/(beta*Ro_rad^2) -> 0; keeps NaN stress NaN
-        r = -expm1(-(y/Ro_rad)^2) # 1 - exp(-y^2/Ro_rad^2)
+        r = curtail(lat, Ro_rad)
     end
     (r*tauy/f, -r*taux/f)
 end
@@ -196,16 +203,18 @@ function advection(Fx, Fy, φ, lon, lat; periodic=isglobal(lon))
 end
 
 
-const Ro_rad = 250e3 # m, equatorial Rossby radius at which pressure balances tau
-
 # scalars s and the sign of the Ekman transport of their medium:
 # ocean (sst) is carried by M, atmosphere (t2, q) by the equal and opposite -M
 const scalars = (sst=1, t2=-1, q=-1)
 # nonlinear terms, computed from daily means, then composited:
 #   adv_s  = -(±M)⋅∇s   advection by Ekman transport of the medium
 #   sdiv_s = s ∇⋅(±M)   s times Ekman transport divergence of the medium
-# so the flux-form tendency is -∇⋅(±M s) = adv_s - sdiv_s
-const nlkeys = (Symbol.(:adv_,  keys(scalars))..., Symbol.(:sdiv_, keys(scalars))...)
+#   s_taux, s_tauy      s times the stress (no sign), so that s M = (s_tauy, -s_taux)/f
+# so the flux-form tendency is -∇⋅(±M s) = adv_s - sdiv_s. M is NOT curtailed at the
+# equator here (Inf where f = 0, so those points drop out of the composites); curtailment
+# by a function of latitude is applied afterwards, e.g. ekman_transport(...; Ro_rad).
+const nlkeys = (Symbol.(:adv_,  keys(scalars))..., Symbol.(:sdiv_, keys(scalars))...,
+                Symbol.(keys(scalars), :_taux)..., Symbol.(keys(scalars), :_tauy)...)
 const fieldkeys = (keys(era5code)..., :q) # taux, tauy, sst, t2, d2, q
 const keys_all  = (fieldkeys..., nlkeys...)
 
@@ -220,13 +229,13 @@ function accumulate!(S, N, x)
 end
 
 """
-    daily_terms(d, lon, lat; dir=era5dir(), code=era5code, Ro_rad=Ro_rad, scalars=scalars)
+    daily_terms(d, lon, lat; dir=era5dir(), code=era5code, scalars=scalars)
 
 Daily means (lon x lat) on date d of the ERA5 fields, q from hourly dewpoint, and the
-nonlinear Ekman terms computed from them, as a NamedTuple with keys `keys_all`.
+nonlinear Ekman terms computed from them (uncurtailed M), as a NamedTuple with keys `keys_all`.
 Returns nothing, with a warning, if the files or hours for d are missing.
 """
-function daily_terms(d, lon, lat; dir=era5dir(), code=era5code, Ro_rad=Ro_rad, scalars=scalars)
+function daily_terms(d, lon, lat; dir=era5dir(), code=era5code, scalars=scalars)
     files = map((dk, ck) -> era5file(dk, ck, d), dir, code)
     if !all(isfile, files)
         @warn "missing ERA5 files for $d" filter(!isfile, collect(files))
@@ -250,13 +259,17 @@ function daily_terms(d, lon, lat; dir=era5dir(), code=era5code, Ro_rad=Ro_rad, s
          t2=dailymean(hours(:t2)), d2=dailymean(hd2), q=dailymean(hd2, qsat_dew))
     end
     isnothing(x) && return nothing
-    # daily Ekman transport and its divergence
-    Mx, My = ekman_transport_xy(x.taux, x.tauy, lat; Ro_rad=Ro_rad)
+    # daily Ekman transport (uncurtailed; Inf at f = 0) and its divergence
+    Mx, My = ekman_transport_xy(x.taux, x.tauy, lat)
     divM = divergence(Mx, My, lon, lat)
     adv  = Tuple(sgn .* advection(Mx, My, x[s], lon, lat) for (s, sgn) in pairs(scalars))
     sdiv = Tuple(sgn .* divM .* x[s] for (s, sgn) in pairs(scalars))
+    staux = Tuple(x[s] .* x.taux for s in keys(scalars))
+    stauy = Tuple(x[s] .* x.tauy for s in keys(scalars))
     merge(x, NamedTuple{Symbol.(:adv_,  keys(scalars))}(adv),
-             NamedTuple{Symbol.(:sdiv_, keys(scalars))}(sdiv))
+             NamedTuple{Symbol.(:sdiv_, keys(scalars))}(sdiv),
+             NamedTuple{Symbol.(keys(scalars), :_taux)}(staux),
+             NamedTuple{Symbol.(keys(scalars), :_tauy)}(stauy))
 end
 
 """
@@ -278,7 +291,7 @@ function composite_mean(days, lon, lat; progress=nothing, kw...)
 end
 
 """
-    composite(groups; dir=era5dir(), code=era5code, Ro_rad=Ro_rad, scalars=scalars)
+    composite(groups; dir=era5dir(), code=era5code, scalars=scalars)
 
 Composite means (lon x lat x group) of the ERA5 fields and the nonlinear Ekman terms,
 one for each vector of dates in `groups`. Means are taken over the finite daily values
@@ -287,7 +300,7 @@ instead of making it NaN. The groups are distributed over the worker processes, 
 worker summing whole groups, so no two processes share an accumulator. Progress is a
 counter of finished days, redrawn in place. Returns (comp, nobs, lon, lat).
 """
-function composite(groups; dir=era5dir(), code=era5code, Ro_rad=Ro_rad, scalars=scalars)
+function composite(groups; dir=era5dir(), code=era5code, scalars=scalars)
     lon, lat = NCDataset(era5file(dir.taux, code.taux, first(Iterators.flatten(groups)))) do ds
         Float64.(ds["longitude"][:]), Float64.(ds["latitude"][:])
     end
@@ -298,7 +311,7 @@ function composite(groups; dir=era5dir(), code=era5code, Ro_rad=Ro_rad, scalars=
         print("\r$n/$total days"); flush(stdout)
     end
     r = pmap(days -> composite_mean(days, lon, lat; progress=progress,
-                                    dir=dir, code=code, Ro_rad=Ro_rad, scalars=scalars),
+                                    dir=dir, code=code, scalars=scalars),
              groups)
     close(progress); wait(printer); println()
     # stack the groups (lon x lat x group)
@@ -310,7 +323,9 @@ end
 # units of the saved fields; M in kg/m/s, so M⋅∇s and s∇⋅M are in kg/m^2/s times the units of s
 const units = (taux="N m-2", tauy="N m-2", sst="K", t2="K", d2="K", q="kg kg-1",
          adv_sst="K kg m-2 s-1", adv_t2="K kg m-2 s-1", adv_q="kg m-2 s-1",
-         sdiv_sst="K kg m-2 s-1", sdiv_t2="K kg m-2 s-1", sdiv_q="kg m-2 s-1")
+         sdiv_sst="K kg m-2 s-1", sdiv_t2="K kg m-2 s-1", sdiv_q="kg m-2 s-1",
+         sst_taux="K N m-2", t2_taux="K N m-2", q_taux="N m-2",
+         sst_tauy="K N m-2", t2_tauy="K N m-2", q_tauy="N m-2")
 
 """
     save_composite(file, comp, nobs, lon, lat, dim, dimvals; dimattrib=[], attrib=[])
@@ -318,10 +333,10 @@ const units = (taux="N m-2", tauy="N m-2", sst="K", t2="K", d2="K", q="kg kg-1",
 Write composites to NetCDF `file` (overwritten): each field k of `comp` as Float32
 (NaN fill), and its count of daily values as Int16 `nobs_k`, on (longitude, latitude, dim),
 with coordinate `dim` = `dimvals`. `dimattrib` and `attrib` are the attributes of the
-coordinate and of the file; Ro_rad and the history are added to the latter.
+coordinate and of the file; the history is added to the latter.
 """
 function save_composite(file, comp, nobs, lon, lat, dim, dimvals; dimattrib=[], attrib=[])
-    NCDataset(file, "c", attrib=[attrib..., "Ro_rad_m" => Ro_rad,
+    NCDataset(file, "c", attrib=[attrib...,
                                  "history" => "$(now()) $(basename(PROGRAM_FILE))"]) do ds
         defVar(ds, "longitude", lon, ("longitude",), attrib=["units" => "degrees_east"])
         defVar(ds, "latitude",  lat, ("latitude",),  attrib=["units" => "degrees_north"])

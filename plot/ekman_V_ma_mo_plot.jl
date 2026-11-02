@@ -5,10 +5,15 @@
 # flux-form tendency -∇⋅(M s) = -M⋅∇s - s ∇⋅M. The ocean's transport is
 # M_o = M = (tauy, -taux)/f; the atmosphere's is equal and opposite, M_a = -M_o.
 # M, m_a, m_o and the gradients are linear in the composited fields, so computing them from
-# the composite means is exact. The nonlinear terms are not: -M⋅∇s and s ∇⋅M are the saved
-# adv_* and sdiv_* composites of daily products (EkmanCommon.daily_terms), whose signs
-# already include M_a = -M_o, so they include the transient (eddy) transport.
+# the composite means is exact. The nonlinear terms are not: -M⋅∇s is the saved adv_*
+# composite of daily products, and the flux M s = (s τy, -s τx)/f comes from the saved
+# s_taux, s_tauy composites (EkmanCommon.daily_terms), so they include the transient (eddy)
+# transport. The saved adv_* signs already include M_a = -M_o.
 # -M⋅∇s > 0 is advection from higher s, a positive tendency (as adv = -M⋅∇ in ekman_mse.jl).
+#
+# The composites are of the uncurtailed M. The equatorial curtailment r = curtail(lat, Ro_rad)
+# depends only on latitude, so it is applied here: M -> r M, -M⋅∇s -> -r M⋅∇s, and
+# -∇⋅(M s) -> -∇⋅(r M s); then s ∇⋅(r M) = -r M⋅∇s + ∇⋅(r M s).
 #
 # Plots are made in ekman_plots.ipynb, which loads this file with Revise:
 #   using Revise; includet("ekman_V_ma_mo_plot.jl")
@@ -18,7 +23,7 @@
 # compositing project.
 using NCDatasets
 using PythonPlot
-using EkmanCommon: c_pa, c_po, Lv, ekman_transport_xy, gradient
+using EkmanCommon: c_pa, c_po, Lv, curtail, ekman_transport_xy, gradient, divergence
 
 """
     plot_defaults!(; fonts, dpi=100)
@@ -41,51 +46,55 @@ plot_defaults!()
 
 ## data
 
-const composite_vars = ("taux", "tauy", "sst", "t2", "q",
-                        "adv_sst", "adv_t2", "adv_q", "sdiv_sst", "sdiv_t2", "sdiv_q")
+const composite_vars = ("taux", "tauy", "sst", "t2", "q", "adv_sst", "adv_t2", "adv_q",
+                        "sst_taux", "sst_tauy", "t2_taux", "t2_tauy", "q_taux", "q_tauy")
 
 """
     read_group(file, k; vars=composite_vars)
 
 Composite fields at index k along the group (pentad/phase) dimension of a composite NetCDF
 file, as a NamedTuple: lon, lat, each of `vars` (lon x lat, Float64, NaN where missing),
-Ro_rad_m (the Ro_rad, m, the file was composited with), dim and dimval (the group dimension's
-name and value at k), file and k.
+dim and dimval (the group dimension's name and value at k), file and k.
 """
 function read_group(file, k; vars=composite_vars)
     NCDataset(file; maskingvalue=NaN) do ds
         dim = last(dimnames(ds["taux"]))
         (; lon=ds["longitude"][:], lat=ds["latitude"][:],
            (Symbol(v) => Float64.(ds[v][:, :, k]) for v in vars)...,
-           Ro_rad_m=ds.attrib["Ro_rad_m"], dim, dimval=ds[dim][k], file, k)
+           dim, dimval=ds[dim][k], file, k)
     end
 end
 
 """
-    ekman_fields(d)
+    ekman_fields(d; Ro_rad)
 
-Fields to plot from `d = read_group(file, k)`, as a NamedTuple (lon x lat arrays):
+Fields to plot from `d = read_group(file, k)`, with the Ekman transport curtailed within
+~`Ro_rad` (m) of the equator by r = curtail(lat, Ro_rad), as a NamedTuple (lon x lat arrays):
 Mx, My (kg/m/s), m_a, m_o (J/kg), their gradients dmodx, dmody, dmadx, dmady (J/kg/m),
 and, in W/m^2, Ekman advection adv_o, adv_a, s times transport divergence sdiv_o, sdiv_a,
-and flux-form tendency flux_o, flux_a; land (true where SST is NaN); and lon, lat.
+and flux-form tendency flux_o, flux_a; r; land (true where SST is NaN); and lon, lat.
 """
-function ekman_fields(d)
-    Mx, My = ekman_transport_xy(d.taux, d.tauy, d.lat; Ro_rad=d.Ro_rad_m)
+function ekman_fields(d; Ro_rad)
+    r  = curtail.(d.lat', Ro_rad)
+    rx(x) = @. ifelse(r == 0, 0.0, r*x) # r x; 0 at the equator, where uncurtailed M is Inf
+    Mx, My = ekman_transport_xy(d.taux, d.tauy, d.lat; Ro_rad)
     m_a = @. c_pa*d.t2 + Lv*d.q # J/kg, T in K
     m_o = @. c_po*d.sst         # J/kg, SST in K
     # gradients of the composite means
     dmodx, dmody = gradient(m_o, d.lon, d.lat)
     dmadx, dmady = gradient(m_a, d.lon, d.lat)
-    # from the saved composites of daily terms; the atmospheric ones already use M_a = -M
-    adv_o  = @. c_po*d.adv_sst               # -M_o⋅∇m_o
-    adv_a  = @. c_pa*d.adv_t2 + Lv*d.adv_q   # -M_a⋅∇m_a
-    sdiv_o = @. c_po*d.sdiv_sst              # m_o ∇⋅M_o
-    sdiv_a = @. c_pa*d.sdiv_t2 + Lv*d.sdiv_q # m_a ∇⋅M_a
-    flux_o = adv_o .- sdiv_o                 # -∇⋅(M_o m_o)
-    flux_a = adv_a .- sdiv_a                 # -∇⋅(M_a m_a)
+    # -r M⋅∇s from the saved composites of daily terms; the atmospheric ones already use M_a = -M
+    adv_o = rx(c_po*d.adv_sst)              # -M_o⋅∇m_o
+    adv_a = rx(c_pa*d.adv_t2 + Lv*d.adv_q)  # -M_a⋅∇m_a
+    # flux form -∇⋅(r M s), with r M s = ekman_transport of the composite s τ
+    fluxdiv(staux, stauy) = divergence(ekman_transport_xy(staux, stauy, d.lat; Ro_rad)..., d.lon, d.lat)
+    flux_o = -c_po*fluxdiv(d.sst_taux, d.sst_tauy)                                # -∇⋅(M_o m_o)
+    flux_a = c_pa*fluxdiv(d.t2_taux, d.t2_tauy) + Lv*fluxdiv(d.q_taux, d.q_tauy)  # -∇⋅(M_a m_a), M_a = -M_o
+    sdiv_o = adv_o - flux_o                                                       # m_o ∇⋅M_o
+    sdiv_a = adv_a - flux_a                                                       # m_a ∇⋅M_a
     land = isnan.(d.sst)
     (; d.lon, d.lat, Mx, My, m_a, m_o, dmodx, dmody, dmadx, dmady,
-       adv_o, adv_a, sdiv_o, sdiv_a, flux_o, flux_a, land)
+       adv_o, adv_a, sdiv_o, sdiv_a, flux_o, flux_a, r, land)
 end
 
 "x with NaN where land is true"
