@@ -138,11 +138,13 @@ panel(x, title, units; cmap="RdBu_r", kw...) = (; x, title, units, cmap, kw=Name
 
 Map each panel in a grid with ncols columns, sharing axes, with land (if given) masked.
 Returns (fig, axs); axs is a Python array of axes indexed from 0 as axs[row, col].
+The "compressed" layout keeps colorbars as tall as their maps, also after e.g.
+`for ax in axs.flat; ax.set_aspect(1); end`.
 """
 function plot_panels(lon, lat, panels; ncols=2, land=nothing, suptitle="",
                      figsize=(7ncols, 3.5cld(length(panels), ncols)))
     nrows = cld(length(panels), ncols)
-    fig, axs = subplots(nrows, ncols; figsize, sharex=true, sharey=true, layout="constrained", squeeze=false)
+    fig, axs = subplots(nrows, ncols; figsize, sharex=true, sharey=true, layout="compressed", squeeze=false)
     for (n, p) in enumerate(panels)
         row, col = divrem(n-1, ncols)
         ax = axs[row, col]
