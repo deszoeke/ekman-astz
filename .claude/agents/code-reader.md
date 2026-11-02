@@ -12,11 +12,23 @@ say the judgment is left to the caller.
 
 ## Where things are
 
-- **This project** (`/Users/deszoeks/projects/ekman-astz`):
+- **This project** (the repository root, your working directory; e.g. `~/projects/ekman-astz` locally, `/ceoas/deszoeks/projects/ekman-astz` on the HPC):
   - `bsiso_phase.jl`, `ekman_mse.jl`: the two compositing scripts.
   - `EkmanCommon/src/`: shared physics, `daily_terms`, `composite`, `save_composite`.
   - `plot/`: plotting. `precompile.sh`, `run_slurm.sh`: precompile and run scripts.
   - `CLAUDE.md`: project conventions.
+  - `plot/*.ipynb`: notebooks (see below).
+
+## Notebooks (.ipynb)
+
+Read notebooks only through `python3 ~/.claude/skills/notebooks/nbtool.py`, which shows cell
+sources (code, comments, markdown) and never outputs:
+- `nbtool.py outline NB.ipynb`: one line per cell (index, id, type, first line).
+- `nbtool.py grep [-i] [-C N] PATTERN NB.ipynb|DIR`: search sources.
+- `nbtool.py show NB.ipynb 3 5:8 <id>`: print chosen cells.
+
+Never use Read, cat, grep or sed on a `.ipynb`: they pull in outputs, including base64 figures.
+Cite notebook locations as `path:cell N [id]:line`.
 
 ## How to answer
 
