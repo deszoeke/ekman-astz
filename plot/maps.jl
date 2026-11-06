@@ -93,7 +93,7 @@ every panel and figure), and a reference arrow of length `key` labelled `keylabe
 given. `kw` go to quiver, e.g. `color="w", width=0.003`.
 E.g. wind stress: `arrows(f.taux, f.tauy; key=0.1, keylabel=raw"0.1 N m\$^{-2}\$")`.
 """
-arrows(u, v; every=12, scale=0.25, key=nothing, keylabel="", keypos=(0.9, 0.05), kw...) =
+arrows(u, v; every=12, scale=0.25, key=nothing, keylabel="", keypos=(0.9, 0.08), kw...) =
     (; u, v, every, scale, key, keylabel, keypos, kw=NamedTuple(kw))
 
 """
