@@ -3,7 +3,7 @@
 #   Settings                      plot_defaults!
 #   General maps                  panel, arrows, contours, plot_panels, draw_*! (any lon x lat fields)
 #   Figures of ekman_fields       stress_arrows, sst_contours, ocean_advection_panel,
-#                                 fig_transport_enthalpy, fig_adv, fig_flux (any period or phase)
+#                                 fig_transport_enthalpy, fig_adv, fig_flux, fig_astz (any period or phase)
 #
 # Figures are shown at the end of the notebook cell that makes them (PythonPlot does this on
 # the IJulia kernel), so there is no display call; adjust a figure in the cell that makes it.
@@ -262,4 +262,23 @@ fig_flux(f; title="", kw...) = plot_panels(f, [
     panel(f.flux_a, raw"atmosphere flux form $-\nabla \cdot (M_a h_a)$", flux_units),
     panel(f.flux_o .+ f.sdiv_o, raw"ocean sum $-\nabla \cdot (M_o h_o) + h_o \nabla \cdot M_o$", flux_units),
     panel(f.flux_a .+ f.sdiv_a, raw"atmosphere sum $-\nabla \cdot (M_a h_a) + h_a \nabla \cdot M_a$", flux_units)];
+    suptitle=title, kw...)
+
+"""
+    fig_astz(f; title="", advlim=60, dhlims=(10, 25), kw...)
+
+Ekman advection in the air-sea transition zone (ASTZ), split with the air moist enthalpy
+saturated at SST, h_* = c_pa SST + Lv q_sat(SST), and h_a = h_* - Δh. Rows: -M_o⋅∇h_o and
+-M_o⋅∇h_*, which partly cancel; -M_o⋅∇(h_o - h_*), depending only on SST, and -M_o⋅∇Δh; the
+ASTZ sum -M_o⋅∇(h_o - h_a) (the sum of row 2) and Δh (kJ/kg, color limits `dhlims`;
+(nothing, nothing): matplotlib's). Advection color limits ±`advlim` (W/m^2). `kw` go to `plot_panels`.
+"""
+fig_astz(f; title="", advlim=60, dhlims=(10, 25), kw...) = plot_panels(f, [
+    panel(f.adv_o, raw"ocean Ekman advection $-M_o \cdot \nabla h_o$, $h_o = c_{po}\mathrm{SST}$", flux_units; vmin=-advlim, vmax=advlim),
+    panel(f.adv_star, raw"$-M_o \cdot \nabla h_*$, $h_* = c_{pa}\mathrm{SST} + L_v q_{sat}(\mathrm{SST})$", flux_units; vmin=-advlim, vmax=advlim),
+    panel(f.adv_o .- f.adv_star, raw"$-M_o \cdot \nabla (h_o - h_*)$ (SST only)", flux_units; vmin=-advlim, vmax=advlim),
+    panel(f.adv_dh, raw"$-M_o \cdot \nabla \Delta h$, $\Delta h = h_* - h_a$", flux_units; vmin=-advlim, vmax=advlim),
+    panel(f.adv_o .+ f.adv_a, raw"ASTZ sum $-M_o \cdot \nabla (h_o - h_a)$", flux_units; vmin=-advlim, vmax=advlim),
+    panel(f.dh ./ 1e3, raw"$\Delta h = c_{pa}(\mathrm{SST} - T_2) + L_v (q_{sat}(\mathrm{SST}) - q)$", raw"kJ kg$^{-1}$";
+          cmap="viridis", vmin=first(dhlims), vmax=last(dhlims))];
     suptitle=title, kw...)

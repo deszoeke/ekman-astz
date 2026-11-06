@@ -23,7 +23,7 @@
 # Notebooks load it with Revise, so edits take effect without restarting the kernel:
 #   using Revise; includet("composites.jl")
 using NCDatasets, Dates, Statistics
-using EkmanCommon: c_pa, c_po, Lv, curtail, ekman_transport_xy, gradient, divergence
+using EkmanCommon: c_pa, c_po, Lv, qsat_dew, curtail, ekman_transport_xy, gradient, divergence
 
 ## General: any composite file (group dimension: pentad or phase)
 
@@ -98,6 +98,9 @@ group_days(file, k; lonlim=nothing, latlim=nothing) =
 "anomaly of x from its mean over dimension `dims` (e.g. phase minus the 8-phase mean)"
 anom(x; dims=3) = x .- mean(x; dims)
 
+"dq_sat/dT (kg/kg/K) at T (K): centered difference of the Buck saturation humidity qsat_dew, as used for q"
+dqsat_dT(T; dT=0.01) = (qsat_dew(T + dT) - qsat_dew(T - dT)) / 2dT
+
 """
     ekman_fields(d; Ro_rad)
 
@@ -107,7 +110,11 @@ r = curtail(lat, Ro_rad), as a NamedTuple (lon x lat arrays, or lon x lat x grou
 SST sst (K); wind stress taux, tauy (N/m^2, not curtailed); Mx, My (kg/m/s); h_a, h_o (J/kg); their
 gradients dhodx, dhody, dhadx, dhady (J/kg/m); Ekman advection of temperature advT_o (SST),
 advT_a (t2) in K kg/m^2/s, and, in W/m^2, Ekman advection adv_o, adv_a, s times transport
-divergence sdiv_o, sdiv_a, and flux-form tendency flux_o, flux_a; r; land (lon x lat, true
+divergence sdiv_o, sdiv_a, and flux-form tendency flux_o, flux_a; for the air-sea transition
+zone (ASTZ), the air moist enthalpy saturated at SST h_star = h_* = c_pa SST + Lv q_sat(SST) and
+dh = Δh = h_* - h_a = c_pa (SST - t2) + Lv (q_sat(SST) - q) (J/kg), and in W/m^2 adv_star =
+-M_o⋅∇h_* and adv_dh = -M_o⋅∇Δh, so the ASTZ sum adv_o + adv_a = -M_o⋅∇(h_o - h_a) =
+(adv_o - adv_star) + adv_dh exactly; r; land (lon x lat, true
 where SST is NaN, in the first group); lon, lat; and dim, dimval from d.
 """
 function ekman_fields(d; Ro_rad)
@@ -130,9 +137,17 @@ function ekman_fields(d; Ro_rad)
     flux_a = c_pa*fluxdiv(d.t2_taux, d.t2_tauy) + Lv*fluxdiv(d.q_taux, d.q_tauy)  # -∇⋅(M_a h_a), M_a = -M_o
     sdiv_o = adv_o - flux_o                                                       # h_o ∇⋅M_o
     sdiv_a = adv_a - flux_a                                                       # h_a ∇⋅M_a
+    # ASTZ: air moist enthalpy saturated at SST, h_* = c_pa SST + Lv q_sat(SST), and h_a = h_* - Δh
+    h_star = @. c_pa*d.sst + Lv*qsat_dew(d.sst) # J/kg
+    dh = h_star .- h_a                           # J/kg, Δh = c_pa (SST - t2) + Lv (q_sat(SST) - q)
+    # -M_o⋅∇h_* = (c_pa + Lv q_sat'(SST)) (-M_o⋅∇SST): linearized, q_sat' at the composite-mean SST
+    # times the composite of daily -M_o⋅∇SST (-M⋅∇q_sat(SST) was not composited)
+    adv_star = rx(@. (c_pa + Lv*dqsat_dT(d.sst)) * d.adv_sst) # -M_o⋅∇h_*
+    adv_dh = adv_star + adv_a # -M_o⋅∇Δh = -M_o⋅∇h_* + M_o⋅∇h_a (M_a = -M_o), the remainder of the ASTZ sum
     land = isnan.(selectdim(d.sst, 3, 1)) # lon x lat for 2-D and 3-D d
     (; d.lon, d.lat, d.sst, d.taux, d.tauy, Mx, My, h_a, h_o, dhodx, dhody, dhadx, dhady,
-       advT_o, advT_a, adv_o, adv_a, sdiv_o, sdiv_a, flux_o, flux_a, r, land, d.dim, d.dimval)
+       advT_o, advT_a, adv_o, adv_a, sdiv_o, sdiv_a, flux_o, flux_a,
+       h_star, dh, adv_star, adv_dh, r, land, d.dim, d.dimval)
 end
 
 ## Pentad climatology (ekman_mse.jl output: group dimension "pentad")
