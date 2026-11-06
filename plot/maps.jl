@@ -64,13 +64,24 @@ end
 """
     panel(x, title, units; cmap="RdBu_r", vec=nothing, kw...)
 
-A map panel of x (lon x lat). `vec`: arrows drawn on top (see `arrows`). `kw` are passed
+A map panel of x (lon x lat). `vec`: arrows drawn on top (see `arrows`); `con`: contour
+lines drawn on top (see `contours`). `kw` are passed
 to pcolormesh, e.g. `vmin=-180, vmax=180`; with neither vmin nor vmax the color limits are
 ±symlim of the plotted (land-masked) x, and `vmin=nothing, vmax=nothing` lets matplotlib
 scale to the data. Change one in a list with
 e.g. `panels[3] = panel(f.m_a, "m_a", "J/kg"; cmap="magma")`.
 """
-panel(x, title, units; cmap="RdBu_r", vec=nothing, kw...) = (; x, title, units, cmap, vec, kw=NamedTuple(kw))
+panel(x, title, units; cmap="RdBu_r", vec=nothing, con=nothing, kw...) = (; x, title, units, cmap, vec, con, kw=NamedTuple(kw))
+
+"""
+    contours(x; levels=nothing, colors="k", linewidths=0.7, label=true, fmt="%g", kw...)
+
+Contour lines of x (lon x lat) to draw on a panel with `panel(...; con=contours(...))`, at
+`levels` (default: matplotlib's), labelled with `fmt` if `label`. `kw` go to contour,
+e.g. `linestyles="-"`. E.g. SST in °C: `contours(f.sst .- 273.15; levels=24:31)`.
+"""
+contours(x; levels=nothing, colors="k", linewidths=0.7, label=true, fmt="%g", kw...) =
+    (; x, levels, label, fmt, kw=(; colors, linewidths, kw...))
 
 """
     arrows(u, v; every=12, scale=0.25, key=nothing, keylabel="", keypos=(0.9, 0.05), kw...)
@@ -90,8 +101,9 @@ arrows(u, v; every=12, scale=0.25, key=nothing, keylabel="", keypos=(0.9, 0.05),
 
 Draw panel `p` (see `panel`) on matplotlib axis `ax`: a rasterized pcolormesh map of p.x
 (lon x lat), land (if given) masked, colorbar with p.units, title p.title, and the arrows
-p.vec if given. Color limits from p.kw, else ±symlim of the masked x. Returns (pc, cb, q),
-the mesh, the colorbar and the quiver (or nothing), for further changes,
+p.vec and contours p.con if given. Color limits from p.kw, else ±symlim of the masked x.
+Returns (pc, cb, q, c), the mesh, the colorbar, the quiver and the contour set (or nothing),
+for further changes,
 e.g. `cb.ax.tick_params(labelsize=8)`. Use it in a notebook's own loop over its own axes:
     fig, axs = subplots(4, 2; figsize=(12, 14), sharex=true, sharey=true, layout="compressed", squeeze=false)
     for (p, ax) in zip(panels, axs.flat); map_panel!(ax, lon, lat, p; land); end
@@ -104,8 +116,17 @@ function map_panel!(ax, lon, lat, p; land=nothing)
     pc = ax.pcolormesh(lon, lat, permutedims(x); cmap=p.cmap, shading="nearest", rasterized=true, lims..., p.kw...)
     cb = colorbar(pc; ax, label=p.units)
     ax.set_title(p.title)
+    c = isnothing(p.con) ? nothing : contour_panel!(ax, lon, lat, p.con; land)
     q = isnothing(p.vec) ? nothing : quiver_panel!(ax, lon, lat, p.vec; land)
-    pc, cb, q
+    pc, cb, q, c
+end
+
+"draw `contours` c on axis ax, land masked; returns the contour set"
+function contour_panel!(ax, lon, lat, c; land=nothing)
+    x = permutedims(isnothing(land) ? c.x : mask(c.x, land))
+    cs = isnothing(c.levels) ? ax.contour(lon, lat, x; c.kw...) : ax.contour(lon, lat, x, collect(c.levels); c.kw...)
+    c.label && ax.clabel(cs; fmt=c.fmt, fontsize="small")
+    cs
 end
 
 "draw `arrows` a on axis ax, land masked; returns the quiver"
@@ -126,9 +147,9 @@ Map each panel with `map_panel!` in a grid with ncols columns, sharing axes, wit
 given) masked, latitude labels on the first column and longitude labels on the last row.
 `xlim`, `ylim` (degrees) and `aspect` apply to all the (shared) axes; aspect "equal" makes a
 degree of latitude and of longitude the same length. The second form takes lon, lat and land
-from the fields `f` (e.g. of `ekman_fields`). Returns (fig, axs, pcs, cbs, qs); axs is a
+from the fields `f` (e.g. of `ekman_fields`). Returns (fig, axs, pcs, cbs, qs, cs); axs is a
 Python array of axes indexed from 0 as axs[row, col], pcs, cbs and qs the meshes, colorbars
-and quivers in panel order (`fig, axs = plot_panels(...)` also works). The "compressed"
+quivers and contour sets in panel order (`fig, axs = plot_panels(...)` also works). The "compressed"
 layout keeps colorbars as tall as their maps. For other layouts, make the axes yourself and
 call `map_panel!` (see there).
 """
@@ -136,12 +157,12 @@ function plot_panels(lon, lat, panels; ncols=2, land=nothing, suptitle="", xlim=
                      ylim=nothing, aspect="equal", figsize=(7ncols, 3.5cld(length(panels), ncols)))
     nrows = cld(length(panels), ncols)
     fig, axs = subplots(nrows, ncols; figsize, sharex=true, sharey=true, layout="compressed", squeeze=false)
-    pcs, cbs, qs = [], [], []
+    pcs, cbs, qs, cs = [], [], [], []
     for (n, p) in enumerate(panels)
         row, col = divrem(n-1, ncols)
         ax = axs[row, col]
-        pc, cb, q = map_panel!(ax, lon, lat, p; land)
-        push!(pcs, pc); push!(cbs, cb); push!(qs, q)
+        pc, cb, q, c = map_panel!(ax, lon, lat, p; land)
+        push!(pcs, pc); push!(cbs, cb); push!(qs, q); push!(cs, c)
         col == 0 && ax.set_ylabel("latitude")
         row == nrows-1 && ax.set_xlabel("longitude")
     end
@@ -155,11 +176,27 @@ function plot_panels(lon, lat, panels; ncols=2, land=nothing, suptitle="", xlim=
         isnothing(aspect) || ax.set_aspect(aspect)
     end
     fig.suptitle(suptitle)
-    fig, axs, pcs, cbs, qs
+    fig, axs, pcs, cbs, qs, cs
 end
 plot_panels(f, panels; kw...) = plot_panels(f.lon, f.lat, panels; land=f.land, kw...)
 
 ## Figures of ekman_fields: f from ekman_fields (one period or phase: lon x lat fields)
+
+"""
+    stress_arrows(f; key=0.1, scale=0.25, kw...)
+
+Wind stress arrows (`arrows`) of f.taux, f.tauy: `scale` N m^-2 per inch (smaller is longer),
+with a `key` N m^-2 arrow. `kw` go to `arrows`, e.g. `keypos=(0.92, 0.88)`, `every=8`.
+"""
+stress_arrows(f; key=0.1, scale=0.25, kw...) =
+    arrows(f.taux, f.tauy; scale, key, keylabel="$key" * raw" N m$^{-2}$", kw...)
+
+"""
+    sst_contours(f; levels=24:0.5:31, colors="0.25", kw...)
+
+SST contours (`contours`) of f.sst in °C. `kw` go to `contours`.
+"""
+sst_contours(f; levels=24:0.5:31, colors="0.25", kw...) = contours(f.sst .- 273.15; levels, colors, kw...)
 
 """
     fig_transport_mse(f; title="", mo_lims=(1200, 1212), ma_lims=(345, 365), advlim=180, tau, kw...)
@@ -167,10 +204,10 @@ plot_panels(f, panels; kw...) = plot_panels(f.lon, f.lat, panels; land=f.land, k
 Ekman transport Mx, My, ocean surface enthalpy m_o and surface-air MSE m_a, with wind stress
 arrows `tau` (default: every 12th point, 0.25 N m^-2 per inch, 0.1 N m^-2 key), and ocean and
 atmosphere Ekman advection. Color limits `mo_lims`, `ma_lims` (kJ/kg), ±`advlim` (W/m^2).
-`kw` go to `plot_panels`, e.g. `ylim=(0, 25)`. Returns (fig, axs, pcs, cbs, qs).
+`kw` go to `plot_panels`, e.g. `ylim=(0, 25)`. Returns (fig, axs, pcs, cbs, qs, cs).
 """
 function fig_transport_mse(f; title="", mo_lims=(1200, 1212), ma_lims=(345, 365), advlim=180,
-        tau=arrows(f.taux, f.tauy; key=0.1, keylabel=raw"0.1 N m$^{-2}$"), kw...)
+        tau=stress_arrows(f), kw...)
     M_units = raw"kg m$^{-1}$ s$^{-1}$"
     plot_panels(f, [
         panel(f.Mx, raw"Ekman transport $M_x$ (ocean), wind stress", M_units; vec=tau),
@@ -215,3 +252,15 @@ fig_flux(f; title="", kw...) = plot_panels(f, [
     panel(f.flux_o .+ f.sdiv_o, raw"ocean sum $-\nabla \cdot (M_o m_o) + m_o \nabla \cdot M_o$", flux_units),
     panel(f.flux_a .+ f.sdiv_a, raw"atmosphere sum $-\nabla \cdot (M_a m_a) + m_a \nabla \cdot M_a$", flux_units)];
     suptitle=title, kw...)
+
+"""
+    fig_ocean_advection(fs, titles; advlim=100, sst=sst_contours.(fs), tau=stress_arrows.(fs), kw...)
+
+One panel per f in `fs` (e.g. periods to compare), titled by `titles`: colors ocean Ekman
+advection -M_o⋅∇m_o (±`advlim` W/m^2), contours SST `sst`, quivers wind stress `tau`
+(one `contours` and one `arrows` per panel). `kw` go to `plot_panels`, e.g. `ncols=1`.
+"""
+fig_ocean_advection(fs, titles; advlim=100, sst=sst_contours.(fs), tau=stress_arrows.(fs), kw...) =
+    plot_panels(first(fs), [panel(f.adv_o, t * raw": ocean Ekman advection $-M_o \cdot \nabla m_o$", flux_units;
+                                  vmin=-advlim, vmax=advlim, con=c, vec=a)
+                            for (f, t, c, a) in zip(fs, titles, sst, tau)]; kw...)
