@@ -21,7 +21,7 @@
 # environment (PythonPlot, NCDatasets, Revise, IJulia, and EkmanCommon developed from
 # ../EkmanCommon), keeping PythonPlot (and CondaPkg's plot/.CondaPkg) out of the
 # compositing project.
-using NCDatasets
+using NCDatasets, Dates
 redirect_stdio(stdout=devnull, stderr=devnull) do
     @eval using PythonPlot
 end
@@ -77,6 +77,55 @@ function read_group(file, k; vars=composite_vars, lonlim=nothing, latlim=nothing
            (Symbol(v) => Float64.(ds[v][i, j, k]) for v in vars)...,
            dim, dimval=ds[dim][k], file, k)
     end
+end
+
+"pentad (1-73) of date d, on the 365-day calendar (Feb 29 joins pentad 12), as in ekman_mse.jl"
+pentad(d::Date) = (dayofyear(d) - (isleapyear(d) && month(d) > 2) - 1) ÷ 5 + 1
+
+"first and last day of pentad p, on the 365-day calendar of 2001 (not a leap year)"
+pentad_dates(p) = (Date(2001, 1, 1) + Day(5p - 5), Date(2001, 1, 1) + Day(5p - 1))
+
+"""
+    pentads_for(first_day, last_day; n=nothing)
+
+Pentads (a range) covering the dates first_day:last_day. With `n`, the n consecutive
+pentads that overlap those dates by the most days; ties go to the pentads whose middle is
+nearest the middle of the dates. E.g. the 6 pentads most closely aligned with May:
+pentads_for(Date(2001, 5, 1), Date(2001, 5, 31); n=6) == 25:30 (May 1-30).
+"""
+function pentads_for(first_day::Date, last_day::Date; n=nothing)
+    ps = pentad.(first_day:Day(1):last_day)
+    isnothing(n) && return minimum(ps):maximum(ps)
+    mid = (pentad(first_day) + pentad(last_day)) / 2 # in pentads
+    score(p0) = (count(in(p0:p0+n-1), ps), -abs(p0 + (n - 1)/2 - mid))
+    p0 = argmax(score, 1:74-n)
+    p0:p0+n-1
+end
+
+"""
+    read_pentads(file, pentads; vars=composite_vars, lonlim=nothing, latlim=nothing)
+
+Mean of the composite fields over `pentads` (e.g. pentads_for(...)) of a pentad composite
+NetCDF file, weighting each pentad's mean by its count of daily values (nobs_v), so it is
+the mean over all the days. Returns the same NamedTuple as read_group, with k the indices
+of the pentads in the file and dimval = pentads. Errors if a pentad is not in the file.
+"""
+function read_pentads(file, pentads; vars=composite_vars, lonlim=nothing, latlim=nothing)
+    filepentads = NCDataset(ds -> ds["pentad"][:], file)
+    missingp = setdiff(pentads, filepentads)
+    isempty(missingp) || error("pentads $missingp are not in $file (it has $(extrema(filepentads)))")
+    k = [findfirst(==(p), filepentads) for p in pentads]
+    d = read_group(file, k; vars, lonlim, latlim)
+    w = read_group(file, k; vars=map(v -> "nobs_$v", vars), lonlim, latlim)
+    function wmean(x, n)
+        ok = @. isfinite(x) & (n > 0)
+        s = dropdims(sum(@. ifelse(ok, n*x, 0.0); dims=3); dims=3)
+        c = dropdims(sum(@. ifelse(ok, n, 0.0); dims=3); dims=3)
+        @. ifelse(c > 0, s/c, NaN)
+    end
+    (; lon=d.lon, lat=d.lat,
+       (Symbol(v) => wmean(d[Symbol(v)], w[Symbol("nobs_$v")]) for v in vars)...,
+       dim=d.dim, dimval=collect(pentads), file, k)
 end
 
 """
