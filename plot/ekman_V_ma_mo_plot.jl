@@ -22,7 +22,9 @@
 # ../EkmanCommon), keeping PythonPlot (and CondaPkg's plot/.CondaPkg) out of the
 # compositing project.
 using NCDatasets
-using PythonPlot
+redirect_stdio(stdout=devnull, stderr=devnull) do
+    @eval using PythonPlot
+end
 using EkmanCommon: c_pa, c_po, Lv, curtail, ekman_transport_xy, gradient, divergence
 
 """
