@@ -166,14 +166,14 @@ $$
 $$
 Then
 $$
-\Delta m_a = c_{pa} \Delta T + L \Delta q 
+\Delta h_a = c_{pa} \Delta T + L \Delta q 
 = [c_{pa} + L(\Delta T/\Delta q)] \Delta T
 \approx 3.4c_{pa} \Delta T
 $$
 The effective specific enthalpy $3.4 c_{pa}$ is nearly as large as $c_{po} = 3.9 c_{pa}$.
 If the atmosphere and ocean Ekman layers have the similar temperature gradients, then adding the gradient of latent heating of vapor in the atmospheric layer approximately makes up for the larger specific enthalpy of liquid water.
 
-Air and ocean temperature gradients are likely to be correlated, and much of the latent heat gradient are expected to be proportional to the temperature gradient by Clausius-Clapeyron. The ratio of the atmospheric moist static energe (MSE) gradient to the ocean enthalpy gradient depends mainly on the mean specific humidity. The full atmospheric MSE contribution is stronger when q is higher. Higher temperature and higher relative humidity juice up the specific humidity and latent heating in the MSE. At low temperature and/or dry RH, the humidity variations are small and the ocean enthalpy will exceed the atmospheric MSE.
+Air and ocean temperature gradients are likely to be correlated, and much of the latent heat gradient are expected to be proportional to the temperature gradient by Clausius-Clapeyron. The ratio of the atmospheric moist enthalpy (moist static energy at the surface) gradient to the ocean enthalpy gradient depends mainly on the mean specific humidity. The full atmospheric moist enthalpy contribution is stronger when q is higher. Higher temperature and higher relative humidity juice up the specific humidity and latent heating in the moist enthalpy. At low temperature and/or dry RH, the humidity variations are small and the ocean enthalpy will exceed the atmospheric moist enthalpy.
 
 ## Differential ocean-atmosphere advection
 The opposing Ekman transports drive differential advection in the ocean and atmosphere. For geostrophic wind anomalies in response to small-scale surface temperature gradients with warm temperature and low pressure (on the left in the northern hemisphere $f>0$), the ocean Ekman heat advection warms, and the atmosphere Ekman advection cools. Thus the Ekman advection drives apart the ocean-air temperature difference.

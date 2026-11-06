@@ -5,11 +5,11 @@
 #   BSISO phases                  (bsiso_phase.jl output) phases
 # The pentad and BSISO sections use only the general section, not each other.
 #
-# Fields: the Ekman mass transport (Mx, My), surface-air moist static energy m_a and
-# ocean-surface enthalpy m_o (h_o in the analysis code); the gradients of m_o and m_a and
+# Fields: the Ekman mass transport (Mx, My), surface-air moist enthalpy h_a = c_pa T2 + Lv q
+# (moist static energy at the surface) and ocean-surface enthalpy h_o = c_po SST; the gradients of h_o and h_a and
 # their Ekman advection -M⋅∇s; and s ∇⋅M and the flux-form tendency -∇⋅(M s) = -M⋅∇s - s ∇⋅M.
 # The ocean's transport is M_o = M = (tauy, -taux)/f; the atmosphere's is M_a = -M_o.
-# M, m_a, m_o and the gradients are linear in the composited fields, so computing them from
+# M, h_a, h_o and the gradients are linear in the composited fields, so computing them from
 # the composite means is exact. The nonlinear terms are not: -M⋅∇s is the saved adv_*
 # composite of daily products, and the flux M s = (s τy, -s τx)/f comes from the saved
 # s_taux, s_tauy composites (EkmanCommon.daily_terms), so they include the transient (eddy)
@@ -104,8 +104,8 @@ anom(x; dims=3) = x .- mean(x; dims)
 Fields to plot from composites `d` (`read_group`, `read_mean`, `read_period`, `read_phase`),
 with the Ekman transport curtailed within ~`Ro_rad` (m) of the equator by
 r = curtail(lat, Ro_rad), as a NamedTuple (lon x lat arrays, or lon x lat x group when d is):
-SST sst (K); wind stress taux, tauy (N/m^2, not curtailed); Mx, My (kg/m/s); m_a, m_o (J/kg); their
-gradients dmodx, dmody, dmadx, dmady (J/kg/m); Ekman advection of temperature advT_o (SST),
+SST sst (K); wind stress taux, tauy (N/m^2, not curtailed); Mx, My (kg/m/s); h_a, h_o (J/kg); their
+gradients dhodx, dhody, dhadx, dhady (J/kg/m); Ekman advection of temperature advT_o (SST),
 advT_a (t2) in K kg/m^2/s, and, in W/m^2, Ekman advection adv_o, adv_a, s times transport
 divergence sdiv_o, sdiv_a, and flux-form tendency flux_o, flux_a; r; land (lon x lat, true
 where SST is NaN, in the first group); lon, lat; and dim, dimval from d.
@@ -114,24 +114,24 @@ function ekman_fields(d; Ro_rad)
     r  = curtail.(d.lat', Ro_rad)
     rx(x) = @. ifelse(r == 0, 0.0, r*x) # r x; 0 at the equator, where uncurtailed M is Inf
     Mx, My = ekman_transport_xy(d.taux, d.tauy, d.lat; Ro_rad)
-    m_a = @. c_pa*d.t2 + Lv*d.q # J/kg, T in K
-    m_o = @. c_po*d.sst         # J/kg, SST in K
+    h_a = @. c_pa*d.t2 + Lv*d.q # J/kg, T in K
+    h_o = @. c_po*d.sst         # J/kg, SST in K
     # gradients of the composite means
-    dmodx, dmody = gradient(m_o, d.lon, d.lat)
-    dmadx, dmady = gradient(m_a, d.lon, d.lat)
+    dhodx, dhody = gradient(h_o, d.lon, d.lat)
+    dhadx, dhady = gradient(h_a, d.lon, d.lat)
     # -r M⋅∇s from the saved composites of daily terms; the atmospheric ones already use M_a = -M
-    adv_o = rx(c_po*d.adv_sst)              # -M_o⋅∇m_o
-    adv_a = rx(c_pa*d.adv_t2 + Lv*d.adv_q)  # -M_a⋅∇m_a
+    adv_o = rx(c_po*d.adv_sst)              # -M_o⋅∇h_o
+    adv_a = rx(c_pa*d.adv_t2 + Lv*d.adv_q)  # -M_a⋅∇h_a
     advT_o = rx(d.adv_sst)                  # -M_o⋅∇SST
     advT_a = rx(d.adv_t2)                   # -M_a⋅∇t2
     # flux form -∇⋅(r M s), with r M s = ekman_transport of the composite s τ
     fluxdiv(staux, stauy) = divergence(ekman_transport_xy(staux, stauy, d.lat; Ro_rad)..., d.lon, d.lat)
-    flux_o = -c_po*fluxdiv(d.sst_taux, d.sst_tauy)                                # -∇⋅(M_o m_o)
-    flux_a = c_pa*fluxdiv(d.t2_taux, d.t2_tauy) + Lv*fluxdiv(d.q_taux, d.q_tauy)  # -∇⋅(M_a m_a), M_a = -M_o
-    sdiv_o = adv_o - flux_o                                                       # m_o ∇⋅M_o
-    sdiv_a = adv_a - flux_a                                                       # m_a ∇⋅M_a
+    flux_o = -c_po*fluxdiv(d.sst_taux, d.sst_tauy)                                # -∇⋅(M_o h_o)
+    flux_a = c_pa*fluxdiv(d.t2_taux, d.t2_tauy) + Lv*fluxdiv(d.q_taux, d.q_tauy)  # -∇⋅(M_a h_a), M_a = -M_o
+    sdiv_o = adv_o - flux_o                                                       # h_o ∇⋅M_o
+    sdiv_a = adv_a - flux_a                                                       # h_a ∇⋅M_a
     land = isnan.(selectdim(d.sst, 3, 1)) # lon x lat for 2-D and 3-D d
-    (; d.lon, d.lat, d.sst, d.taux, d.tauy, Mx, My, m_a, m_o, dmodx, dmody, dmadx, dmady,
+    (; d.lon, d.lat, d.sst, d.taux, d.tauy, Mx, My, h_a, h_o, dhodx, dhody, dhadx, dhady,
        advT_o, advT_a, adv_o, adv_a, sdiv_o, sdiv_a, flux_o, flux_a, r, land, d.dim, d.dimval)
 end
 
