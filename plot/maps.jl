@@ -2,8 +2,7 @@
 # composites.jl). Sections, from general to specific:
 #   Settings                      plot_defaults!
 #   General maps                  panel, arrows, contours, plot_panels, draw_*! (any lon x lat fields)
-#   Figures of ekman_fields       stress_arrows, sst_contours, ocean_advection_panel,
-#                                 fig_transport_enthalpy, fig_adv, fig_flux, fig_astz (any period or phase)
+#   Overlays of ekman_fields      stress_arrows, sst_contours (wind stress arrows, SST contours)
 #
 # Figures are shown at the end of the notebook cell that makes them (PythonPlot does this on
 # the IJulia kernel), so there is no display call; adjust a figure in the cell that makes it.
@@ -57,6 +56,8 @@ const flux_units = raw"W m$^{-2}$"
 const grad_units = raw"J kg$^{-1}$ km$^{-1}$"
 const advT_units = raw"K kg m$^{-2}$ s$^{-1}$"
 const tau_units  = raw"N m$^{-2}$"
+const M_units    = raw"kg m$^{-1}$ s$^{-1}$"
+const h_units    = raw"kJ kg$^{-1}$"
 
 "x with NaN where land is true"
 mask(x, land) = ifelse.(land, NaN, x)
@@ -181,7 +182,9 @@ function draw_arrows!(ax, lon, lat, arrows; land=nothing)
     quiver
 end
 
-## Figures of ekman_fields: f from ekman_fields (one period or phase: lon x lat fields)
+## Overlays of ekman_fields: f from ekman_fields (one period or phase: lon x lat fields)
+#
+# The figures themselves are written in the notebooks, as plot_panels(f, [panel(...), ...]).
 
 """
     stress_arrows(f; scale=0.25, key=0.1, kw...)
@@ -198,87 +201,3 @@ stress_arrows(f; scale=0.25, key=0.1, kw...) =
 SST `contours` of f.sst in °C. `kw` go to `contours`.
 """
 sst_contours(f; levels=24:0.5:31, colors="0.25", kw...) = contours(f.sst .- 273.15; levels, colors, kw...)
-
-"""
-    ocean_advection_panel(f, title; advlim=100, contours=sst_contours(f), arrows=stress_arrows(f))
-
-A `panel` of ocean Ekman advection -M_o⋅∇h_o in colors (±`advlim` W m^-2), titled `title`,
-with SST `contours` and wind stress `arrows`.
-"""
-ocean_advection_panel(f, title; advlim=100, contours=sst_contours(f), arrows=stress_arrows(f)) =
-    panel(f.adv_o, title * raw": ocean Ekman advection $-M_o \cdot \nabla h_o$", flux_units;
-          vmin=-advlim, vmax=advlim, contours, arrows)
-
-"""
-    fig_transport_enthalpy(f; title="", ho_lims=(1200, 1212), ha_lims=(345, 365), advlim=180,
-                      arrows=stress_arrows(f), kw...)
-
-Ekman transport Mx, My, ocean-surface enthalpy h_o and surface-air moist enthalpy h_a, with wind stress
-`arrows`, and ocean and atmosphere Ekman advection. Color limits `ho_lims`, `ha_lims`
-(kJ/kg), ±`advlim` (W/m^2). `kw` go to `plot_panels`, e.g. `ylim=(0, 25)`.
-"""
-function fig_transport_enthalpy(f; title="", ho_lims=(1200, 1212), ha_lims=(345, 365), advlim=180,
-                           arrows=stress_arrows(f), kw...)
-    M_units = raw"kg m$^{-1}$ s$^{-1}$"
-    plot_panels(f, [
-        panel(f.Mx, raw"Ekman transport $M_x$ (ocean), wind stress", M_units; arrows),
-        panel(f.My, raw"Ekman transport $M_y$ (ocean), wind stress", M_units; arrows),
-        panel(f.h_o ./ 1e3, raw"ocean-surface enthalpy $h_o = c_{po}$ SST", raw"kJ kg$^{-1}$";
-              arrows, cmap="viridis", vmin=first(ho_lims), vmax=last(ho_lims)),
-        panel(f.h_a ./ 1e3, raw"surface-air moist enthalpy $h_a = c_{pa} T_2 + L_v q$", raw"kJ kg$^{-1}$";
-              arrows, cmap="viridis", vmin=first(ha_lims), vmax=last(ha_lims)),
-        panel(f.adv_o, raw"ocean Ekman advection $-M_o \cdot \nabla h_o$", flux_units; vmin=-advlim, vmax=advlim),
-        panel(f.adv_a, raw"atmosphere Ekman advection $-M_a \cdot \nabla h_a$, $M_a = -M_o$", flux_units; vmin=-advlim, vmax=advlim)];
-        suptitle=title, kw...)
-end
-
-"""
-    fig_adv(f; title="", Tlim=0.05, Hlim=60, kw...)
-
-Ocean and atmosphere Ekman advection, their sum and difference (rows). Columns: temperature
-(±`Tlim`, K kg/m^2/s) and (moist) enthalpy (±`Hlim`, W/m^2). `kw` go to `plot_panels`.
-"""
-fig_adv(f; title="", Tlim=0.05, Hlim=60, kw...) = plot_panels(f, [
-    panel(f.advT_o, raw"ocean advection $-M_o \cdot \nabla$SST", advT_units; vmin=-Tlim, vmax=Tlim),
-    panel(f.adv_o, raw"ocean enthalpy advection $-M_o \cdot \nabla h_o$, $h_o = c_{po}$SST", flux_units; vmin=-Hlim, vmax=Hlim),
-    panel(f.advT_a, raw"atmosphere advection $-M_a \cdot \nabla T_2$", advT_units; vmin=-Tlim, vmax=Tlim),
-    panel(f.adv_a, raw"atmosphere moist enthalpy advection $-M_a \cdot \nabla h_a$, $h_a = c_{pa}T_2 + L_v q$", flux_units; vmin=-Hlim, vmax=Hlim),
-    panel(f.advT_o .+ f.advT_a, "oc+atm T advection sum", advT_units; vmin=-Tlim, vmax=Tlim),
-    panel(f.adv_o .+ f.adv_a, "oc+atm advection sum", flux_units; vmin=-Hlim, vmax=Hlim),
-    panel(f.advT_o .- f.advT_a, "oc-atm T advection difference", advT_units; vmin=-Tlim, vmax=Tlim),
-    panel(f.adv_o .- f.adv_a, "oc-atm advection difference", flux_units; vmin=-Hlim, vmax=Hlim)];
-    suptitle=title, kw...)
-
-"""
-    fig_flux(f; title="", kw...)
-
-Ocean and atmosphere h ∇⋅M, flux form -∇⋅(M h), and their sum (color limits ±symlim).
-`kw` go to `plot_panels`.
-"""
-fig_flux(f; title="", kw...) = plot_panels(f, [
-    panel(f.sdiv_o, raw"ocean $h_o \nabla \cdot M_o$", flux_units),
-    panel(f.sdiv_a, raw"atmosphere $h_a \nabla \cdot M_a$", flux_units),
-    panel(f.flux_o, raw"ocean flux form $-\nabla \cdot (M_o h_o)$", flux_units),
-    panel(f.flux_a, raw"atmosphere flux form $-\nabla \cdot (M_a h_a)$", flux_units),
-    panel(f.flux_o .+ f.sdiv_o, raw"ocean sum $-\nabla \cdot (M_o h_o) + h_o \nabla \cdot M_o$", flux_units),
-    panel(f.flux_a .+ f.sdiv_a, raw"atmosphere sum $-\nabla \cdot (M_a h_a) + h_a \nabla \cdot M_a$", flux_units)];
-    suptitle=title, kw...)
-
-"""
-    fig_astz(f; title="", advlim=60, dhlims=(10, 25), kw...)
-
-Ekman advection in the air-sea transition zone (ASTZ), split with the air moist enthalpy
-saturated at SST, h_* = c_pa SST + Lv q_sat(SST), and h_a = h_* - Δh. Rows: -M_o⋅∇h_o and
--M_o⋅∇h_*, which partly cancel; -M_o⋅∇(h_o - h_*), depending only on SST, and -M_o⋅∇Δh; the
-ASTZ sum -M_o⋅∇(h_o - h_a) (the sum of row 2) and Δh (kJ/kg, color limits `dhlims`;
-(nothing, nothing): matplotlib's). Advection color limits ±`advlim` (W/m^2). `kw` go to `plot_panels`.
-"""
-fig_astz(f; title="", advlim=60, dhlims=(10, 25), kw...) = plot_panels(f, [
-    panel(f.adv_o, raw"ocean Ekman advection $-M_o \cdot \nabla h_o$, $h_o = c_{po}\mathrm{SST}$", flux_units; vmin=-advlim, vmax=advlim),
-    panel(f.adv_star, raw"$-M_o \cdot \nabla h_*$, $h_* = c_{pa}\mathrm{SST} + L_v q_{sat}(\mathrm{SST})$", flux_units; vmin=-advlim, vmax=advlim),
-    panel(f.adv_o .- f.adv_star, raw"$-M_o \cdot \nabla (h_o - h_*)$ (SST only)", flux_units; vmin=-advlim, vmax=advlim),
-    panel(f.adv_dh, raw"$-M_o \cdot \nabla \Delta h$, $\Delta h = h_* - h_a$", flux_units; vmin=-advlim, vmax=advlim),
-    panel(f.adv_o .+ f.adv_a, raw"ASTZ sum $-M_o \cdot \nabla (h_o - h_a)$", flux_units; vmin=-advlim, vmax=advlim),
-    panel(f.dh ./ 1e3, raw"$\Delta h = c_{pa}(\mathrm{SST} - T_2) + L_v (q_{sat}(\mathrm{SST}) - q)$", raw"kJ kg$^{-1}$";
-          cmap="viridis", vmin=first(dhlims), vmax=last(dhlims))];
-    suptitle=title, kw...)
