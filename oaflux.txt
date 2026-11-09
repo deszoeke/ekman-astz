@@ -1,0 +1,4 @@
+evaporation/evapr_oaflux_1985.nc  turbulence/lh_oaflux_1985.nc  turbulence/ts_oaflux_1985.nc
+netheat/qnet_1985.nc              turbulence/qa_oaflux_1985.nc  turbulence/ws_oaflux_1985.nc
+radiation/lw_isccp_1985.nc        turbulence/sh_oaflux_1985.nc
+radiation/sw_isccp_1985.nc        turbulence/ta_oaflux_1985.nc
