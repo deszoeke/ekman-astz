@@ -3,7 +3,7 @@
 
 Shared code for ekman_mse.jl and bsiso_phase.jl: ERA5 file access, thermodynamics,
 Ekman transport, finite differences on the sphere, and compositing daily fields over
-groups of days on worker processes, for ERA5 (`composite`) or OAFlux (`oaflux_composite`). Load it on every process:
+groups of days on worker processes, for ERA5 (`composite`), OAFlux (`oaflux_composite`) or CERES (`ceres_composite`); `composite_data` picks one. Load it on every process:
     @everywhere using EkmanCommon
 """
 module EkmanCommon
@@ -17,7 +17,8 @@ export era5dir, era5code, era5file, month_files, month_blocks, chunk_cache, dail
        fieldkeys, nlkeys, keys_all, scalars, c_pa, c_po, Lv, esat_buck, qsat_dew,
        coriolis, curtail, ekman_transport, ekman_transport_xy, gradient, divergence, advection,
        dailymean, accumulate!,
-       oaflux_files, oaflux_turbulent, oafluxfile, oaflux_mean, oaflux_composite
+       oaflux_files, oaflux_turbulent, oafluxfile, oaflux_mean, oaflux_composite,
+       ceres_vars, ceresfiles, ceres_mean, ceres_composite, pmap_groups, composite_data
 
 # ERA5 hourly surface analysis from NCAR RDA d633000, one file per variable per month:
 #   <dir>/201201/e5.oper.an.sfc.128_229_iews.ll025sc.2012010100_2012013123.nc
@@ -356,26 +357,39 @@ const oaflux_files = (lh="turbulence/lh_oaflux", sh="turbulence/sh_oaflux",
                       lw="radiation/lw_isccp", sw="radiation/sw_isccp", qnet="netheat/qnet")
 const oaflux_turbulent = (:lh, :sh, :evapr, :qa, :ta, :ts, :ws) # the variables through 2022
 
+# CERES SYN1deg-Day Ed4.2 adjusted all-sky radiative fluxes (W m-2), 1-degree like OAFlux,
+# in files of ~2.5 years each (CERES_SYN1deg-Day_*.nc under `ceresroot`), March 2000-August 2026.
+# Short name => variable; lw down at the TOA (zero) is left out.
+const ceres_vars = (sw_dn_toa="adj_atmos_sw_down_all_toa_daily", sw_up_toa="adj_atmos_sw_up_all_toa_daily",
+                    lw_up_toa="adj_atmos_lw_up_all_toa_daily",
+                    sw_dn_sfc="adj_atmos_sw_down_all_surface_daily", sw_up_sfc="adj_atmos_sw_up_all_surface_daily",
+                    lw_dn_sfc="adj_atmos_lw_down_all_surface_daily", lw_up_sfc="adj_atmos_lw_up_all_surface_daily")
+
 "OAFlux file of variable k (a key of oaflux_files) for year y under root"
 oafluxfile(root, k, y) = joinpath(root, "$(oaflux_files[k])_$y.nc")
+
+"CERES SYN1deg daily files under root, in time order"
+ceresfiles(root) = sort(filter(f -> startswith(basename(f), "CERES_SYN1deg-Day") && endswith(f, ".nc"),
+                               readdir(root; join=true)))
 
 "the data variable in an OAFlux file (3 dimensions lon x lat x time; not an err field)"
 oafluxvar(ds) = first(k for k in keys(ds) if ndims(ds[k]) == 3 && !startswith(lowercase(k), "err"))
 
-"longitude and latitude of an OAFlux data variable v, from its first two dimensions"
-oafluxgrid(ds, v) = (Float64.(ds[dimnames(v)[1]][:]), Float64.(ds[dimnames(v)[2]][:]))
+"longitude and latitude of a lon x lat x time variable v, from its first two dimensions"
+datagrid(ds, v) = (Float64.(ds[dimnames(v)[1]][:]), Float64.(ds[dimnames(v)[2]][:]))
+
+"lon x lat zero sums and counts for each of vars"
+zerosums(vars, lon, lat) = (NamedTuple{vars}(Tuple(zeros(length(lon), length(lat)) for k in vars)),
+                            NamedTuple{vars}(Tuple(zeros(Int16, length(lon), length(lat)) for k in vars)))
 
 """
-    oaflux_mean(days, lon, lat; progress=nothing, root, vars=keys(oaflux_files))
+    oaflux_accumulate!(S, N, days, lon, lat; root, vars, done=n -> nothing)
 
-Mean over `days` of the OAFlux daily fields `vars`, like `composite_mean`: returns (mean, nobs),
-NamedTuples of lon x lat arrays, NaN where nobs is 0. Each file holds one field per day of its
-year, in order. A year with any missing file is skipped with a warning.
+Add the OAFlux daily fields `vars` on `days` to the sums S and counts N. Each file holds one
+field per day of its year, in order. A year with any missing file is skipped with a warning.
+`done(n)` is called with the number of days of each year as it finishes.
 """
-function oaflux_mean(days, lon, lat; progress=nothing, root, vars=keys(oaflux_files))
-    S = NamedTuple{vars}(Tuple(zeros(length(lon), length(lat)) for k in vars))
-    N = NamedTuple{vars}(Tuple(zeros(Int16, length(lon), length(lat)) for k in vars))
-    done(n) = isnothing(progress) || foreach(_ -> put!(progress, 1), 1:n)
+function oaflux_accumulate!(S, N, days, lon, lat; root, vars, done=n -> nothing)
     for y in unique(year.(days))
         ydays = filter(d -> year(d) == y, days)
         files = map(k -> oafluxfile(root, k, y), NamedTuple{vars}(vars))
@@ -387,7 +401,7 @@ function oaflux_mean(days, lon, lat; progress=nothing, root, vars=keys(oaflux_fi
         for k in vars
             NCDataset(files[k]; maskingvalue=NaN) do ds
                 v = ds[oafluxvar(ds)]
-                oafluxgrid(ds, v) == (lon, lat) || error("grid of $(files[k]) differs from the first file's")
+                datagrid(ds, v) == (lon, lat) || error("grid of $(files[k]) differs from the first file's")
                 size(v, 3) == daysinyear(y) || error("$(files[k]) has $(size(v, 3)) days, not $(daysinyear(y))")
                 for d in ydays
                     accumulate!(S[k], N[k], Float64.(v[:, :, dayofyear(d)]))
@@ -396,32 +410,134 @@ function oaflux_mean(days, lon, lat; progress=nothing, root, vars=keys(oaflux_fi
         end
         done(length(ydays))
     end
-    map((s, n) -> s ./ n, S, N), N
 end
 
 """
-    oaflux_composite(groups; root, vars=keys(oaflux_files))
+    ceres_accumulate!(S, N, days, lon, lat; files, vars)
 
-Composite OAFlux daily fields over each group of days, like `composite` for ERA5: each worker
-takes whole groups. Returns (comp, nobs, lon, lat, units); comp and nobs are NamedTuples of
-lon x lat x group arrays, units a NamedTuple of each variable's units attribute.
+Add the CERES daily fields `vars` (keys of ceres_vars) on `days` to the sums S and counts N,
+finding the days by the time coordinate of each of `files`. Warns of days in no file.
+`done(n)` is called with the number of days found in each file, and of days not found.
 """
-function oaflux_composite(groups; root, vars=keys(oaflux_files))
-    y0 = year(first(Iterators.flatten(groups)))
-    lon, lat = NCDataset(ds -> oafluxgrid(ds, ds[oafluxvar(ds)]), oafluxfile(root, first(vars), y0))
-    units = map(NamedTuple{vars}(vars)) do k
-        NCDataset(ds -> get(ds[oafluxvar(ds)].attrib, "units", ""), oafluxfile(root, k, y0))
+function ceres_accumulate!(S, N, days, lon, lat; files, vars, done=n -> nothing)
+    want = Set(days)
+    found = 0
+    for file in files
+        NCDataset(file; maskingvalue=NaN) do ds
+            it = findall(in(want), Date.(ds["time"][:]))
+            isempty(it) && return
+            for k in vars
+                v = ds[ceres_vars[k]]
+                datagrid(ds, v) == (lon, lat) || error("grid of $(ceres_vars[k]) in $file differs from the first file's")
+                for i in it
+                    accumulate!(S[k], N[k], Float64.(v[:, :, i]))
+                end
+            end
+            found += length(it)
+            done(length(it))
+        end
     end
+    if found < length(days)
+        @warn "$(length(days) - found) of $(length(days)) days are not in the CERES files"
+        done(length(days) - found)
+    end
+end
+
+"""
+    oaflux_mean(days, lon, lat; progress=nothing, root, vars)
+    ceres_mean(days, lon, lat; progress=nothing, files, vars)
+
+Mean over `days` of the OAFlux or CERES daily fields `vars`, like `composite_mean`:
+returns (mean, nobs), NamedTuples of lon x lat arrays, NaN where nobs is 0.
+"""
+function oaflux_mean(days, lon, lat; progress=nothing, root, vars)
+    S, N = zerosums(vars, lon, lat)
+    oaflux_accumulate!(S, N, days, lon, lat; root, vars, done=progress_done(progress))
+    map((s, n) -> s ./ n, S, N), N
+end
+function ceres_mean(days, lon, lat; progress=nothing, files, vars)
+    S, N = zerosums(vars, lon, lat)
+    ceres_accumulate!(S, N, days, lon, lat; files, vars, done=progress_done(progress))
+    map((s, n) -> s ./ n, S, N), N
+end
+
+"a function that puts n ones on the channel `progress` (nothing: does nothing)"
+progress_done(progress) = n -> isnothing(progress) || foreach(_ -> put!(progress, 1), 1:n)
+
+"""
+    pmap_groups(f, groups)
+
+Call f(days, progress) on the workers for each group of days (each worker takes whole groups),
+printing a counter of days as f puts 1 on the channel `progress` for each. f returns (mean, nobs),
+NamedTuples of lon x lat arrays; these are stacked to lon x lat x group and returned.
+"""
+function pmap_groups(f, groups)
     progress = RemoteChannel(() -> Channel{Int}(256))
     total = sum(length, groups)
     printer = @async for (n, _) in enumerate(progress)
         print("\r$n/$total days"); flush(stdout)
     end
-    r = pmap(days -> oaflux_mean(days, lon, lat; progress, root, vars), groups)
+    r = pmap(days -> f(days, progress), groups)
     close(progress); wait(printer); println()
-    comp = map(k -> stack(ri[1][k] for ri in r), NamedTuple{vars}(vars))
-    nobs = map(k -> stack(ri[2][k] for ri in r), NamedTuple{vars}(vars))
+    ks = keys(first(r)[1])
+    map(k -> stack(ri[1][k] for ri in r), NamedTuple{ks}(ks)),
+    map(k -> stack(ri[2][k] for ri in r), NamedTuple{ks}(ks))
+end
+
+"""
+    oaflux_composite(groups; root, vars=keys(oaflux_files))
+    ceres_composite(groups; root, vars=keys(ceres_vars))
+
+Composite OAFlux or CERES SYN1deg daily fields `vars` over each group of days, like `composite`
+for ERA5. Returns (comp, nobs, lon, lat, units); comp and nobs are NamedTuples of
+lon x lat x group arrays, units a NamedTuple of each variable's units attribute.
+"""
+function oaflux_composite(groups; root, vars=keys(oaflux_files))
+    y0 = year(first(Iterators.flatten(groups)))
+    lon, lat = NCDataset(ds -> datagrid(ds, ds[oafluxvar(ds)]), oafluxfile(root, first(vars), y0))
+    units = map(NamedTuple{vars}(vars)) do k
+        NCDataset(ds -> get(ds[oafluxvar(ds)].attrib, "units", ""), oafluxfile(root, k, y0))
+    end
+    comp, nobs = pmap_groups((days, progress) -> oaflux_mean(days, lon, lat; progress, root, vars), groups)
     comp, nobs, lon, lat, units
+end
+function ceres_composite(groups; root, vars=keys(ceres_vars))
+    files = ceresfiles(root)
+    isempty(files) && error("no CERES_SYN1deg-Day files in $root")
+    lon, lat, units = NCDataset(first(files)) do ds
+        (datagrid(ds, ds[ceres_vars[first(vars)]])...,
+         map(k -> get(ds[ceres_vars[k]].attrib, "units", ""), NamedTuple{vars}(vars)))
+    end
+    comp, nobs = pmap_groups((days, progress) -> ceres_mean(days, lon, lat; progress, files, vars), groups)
+    comp, nobs, lon, lat, units
+end
+
+"""
+    composite_data(data, groups; era5root, oafluxroot, ceresroot)
+
+Composite each group of days of the data set `data`, each in its own run and file:
+`:era5`: ERA5 fields and Ekman terms (`composite`), from era5dir(era5root);
+`:oaflux`: all OAFlux fields, with ISCCP radiation and qnet (through 2009);
+`:oafluxturb`: the OAFlux turbulent fields only (through 2022);
+`:ceres`: CERES SYN1deg adjusted all-sky surface and TOA radiative fluxes (from March 2000).
+OAFlux and CERES composites of the same days can be combined after compositing (same grid).
+Returns (comp, nobs, lon, lat, units, prefix, title); prefix and title name the data in the
+output file name and title.
+"""
+function composite_data(data, groups; era5root, oafluxroot, ceresroot)
+    if data == :era5
+        (composite(groups; dir=era5dir(era5root))..., units, "ekman", "ERA5 surface fields and Ekman terms")
+    elseif data == :oaflux
+        (oaflux_composite(groups; root=oafluxroot)..., "oaflux", "OAFlux daily surface fluxes and meteorology")
+    elseif data == :oafluxturb
+        (oaflux_composite(groups; root=oafluxroot, vars=oaflux_turbulent)...,
+         "oafluxturb", "OAFlux daily turbulent fluxes and meteorology")
+    elseif data == :ceres
+        (ceres_composite(groups; root=ceresroot)...,
+         "ceres", "CERES SYN1deg daily adjusted all-sky surface and TOA radiative fluxes")
+    else
+        error("data must be :era5, :oaflux, :oafluxturb or :ceres, not :$data")
+    end
 end
 
 # units of the saved fields; M in kg/m/s, so M⋅∇s and s∇⋅M are in kg/m^2/s times the units of s

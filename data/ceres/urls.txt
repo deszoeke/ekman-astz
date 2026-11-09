@@ -1,0 +1,11 @@
+https://ceres-tool.larc.nasa.gov/ord-tool/data1//CERES_2026-11-09:42130/dir1/CERES_SYN1deg-Day_Terra-Aqua-NOAA20_Ed4.2_Subset_20000301-20020902.nc
+https://ceres-tool.larc.nasa.gov/ord-tool/data1//CERES_2026-11-09:42130/dir1/CERES_SYN1deg-Day_Terra-Aqua-NOAA20_Ed4.2_Subset_20020903-20050306.nc
+https://ceres-tool.larc.nasa.gov/ord-tool/data1//CERES_2026-11-09:42130/dir1/CERES_SYN1deg-Day_Terra-Aqua-NOAA20_Ed4.2_Subset_20050307-20070908.nc
+https://ceres-tool.larc.nasa.gov/ord-tool/data1//CERES_2026-11-09:42130/dir1/CERES_SYN1deg-Day_Terra-Aqua-NOAA20_Ed4.2_Subset_20070909-20100312.nc
+https://ceres-tool.larc.nasa.gov/ord-tool/data1//CERES_2026-11-09:42130/dir1/CERES_SYN1deg-Day_Terra-Aqua-NOAA20_Ed4.2_Subset_20100313-20120913.nc
+https://ceres-tool.larc.nasa.gov/ord-tool/data1//CERES_2026-11-09:42130/dir1/CERES_SYN1deg-Day_Terra-Aqua-NOAA20_Ed4.2_Subset_20120914-20150318.nc
+https://ceres-tool.larc.nasa.gov/ord-tool/data1//CERES_2026-11-09:42130/dir1/CERES_SYN1deg-Day_Terra-Aqua-NOAA20_Ed4.2_Subset_20150319-20170919.nc
+https://ceres-tool.larc.nasa.gov/ord-tool/data1//CERES_2026-11-09:42130/dir1/CERES_SYN1deg-Day_Terra-Aqua-NOAA20_Ed4.2_Subset_20170920-20200323.nc
+https://ceres-tool.larc.nasa.gov/ord-tool/data1//CERES_2026-11-09:42130/dir1/CERES_SYN1deg-Day_Terra-Aqua-NOAA20_Ed4.2_Subset_20200324-20220925.nc
+https://ceres-tool.larc.nasa.gov/ord-tool/data1//CERES_2026-11-09:42130/dir1/CERES_SYN1deg-Day_Terra-Aqua-NOAA20_Ed4.2_Subset_20220926-20250329.nc
+https://ceres-tool.larc.nasa.gov/ord-tool/data1//CERES_2026-11-09:42130/dir1/CERES_SYN1deg-Day_Terra-Aqua-NOAA20_Ed4.2_Subset_20250330-20260831.nc
