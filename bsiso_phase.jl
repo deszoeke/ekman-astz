@@ -18,7 +18,7 @@ ceoasdir = "./data"
 # OAFlux daily data root (turbulence/, evaporation/, radiation/, netheat/), on the HPC in the repo
 oafluxdir = "data/oaflux/daily"
 # CERES SYN1deg-Day files (CERES_SYN1deg-Day_*.nc), on the HPC in the repo
-ceresdir = "data/ceres"
+ceresdir = "data/ceres/adjusted" # symlink to /storage/ceoas-datasets/datasets/ERA5/staging/simon/ceres/adjusted
 # days of each data set: ERA5 (Andrea's data stop at 2020); all OAFlux variables (radiation
 # and qnet stop at 2009); OAFlux turbulent fields and CERES radiation over the same days, to be
 # combined after compositing (CERES starts on 2000-03-01; from 2000-04-01, as the pentad climatology; OAFlux turbulence stops in 2022)
