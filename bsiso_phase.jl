@@ -3,6 +3,7 @@ using EkmanCommon
 
 # Composites of ERA5 surface fields and air-sea Ekman terms by BSISO1 phase (1-8).
 #   script:  julia --project -p 8 bsiso_phase.jl    or    sbatch --nodes=1 --ntasks-per-node=8 run_slurm.sh bsiso_phase.jl
+#            OAFlux instead of ERA5: add the argument oaflux, e.g. sbatch run_slurm.sh bsiso_phase.jl oaflux
 #   REPL:    include("bsiso_phase.jl") defines the functions only; then, for workers,
 #              addprocs(4); @everywhere using EkmanCommon
 #            and e.g. main(days=Date(2012,1,1):Day(1):Date(2012,3,31))
@@ -14,6 +15,8 @@ using EkmanCommon
 
 # ERA5 data root, e.g. "/storage/ceoas-datasets/datasets/ERA5/staging/andrea/1hr/SFC"
 ceoasdir = "./data"
+# OAFlux daily data root (turbulence/, evaporation/, radiation/, netheat/), on the HPC in the repo
+oafluxdir = "data/oaflux/daily"
 
 "convert PC1, PC2 components of BSISO into canonical phase index (1-8)"
 phase(b1, b2) = mod(floor(8/(2*pi) * atan(b1, -b2)), 8) + 1
@@ -48,21 +51,35 @@ end
 phase_days(phaselookup, days) = [filter(d -> get(phaselookup, d, 0) == p, days) for p in 1:8]
 
 """
-    main(; days, ampmin, ceoasdir, indexfile)
+    main(; data=:era5, days, ampmin, ceoasdir, oafluxdir, vars, indexfile)
 
-Composite by BSISO1 phase over `days` (default 2012-2020; the ERA5 data stop at 2020), save the NetCDF
-file, and return (comp, nobs, lon, lat).
+Composite by BSISO1 phase over `days`, save the NetCDF file, and return (comp, nobs, lon, lat).
+`data=:era5`: ERA5 fields and Ekman terms, days 2012-2020 (the ERA5 data stop at 2020),
+written to ekman_bsiso1_phase_<years>.nc.
+`data=:oaflux`: OAFlux daily fields `vars`, days 1985-2009 (all variables; radiation and qnet
+stop in 2009; for 1985-2022 pass vars=oaflux_turbulent), written to oaflux_bsiso1_phase_<years>.nc.
 """
-function main(; days=Date(2012,1,1):Day(1):Date(2020,12,31), ampmin=1.0,
-                ceoasdir=ceoasdir, indexfile="data/BSISO.INDEX.NORM.LY.data")
+function main(; data=:era5,
+                days=(data == :oaflux ? (Date(1985,1,1):Day(1):Date(2009,12,31)) : (Date(2012,1,1):Day(1):Date(2020,12,31))),
+                ampmin=1.0, ceoasdir=ceoasdir, oafluxdir=oafluxdir, vars=keys(oaflux_files),
+                indexfile="data/BSISO.INDEX.NORM.LY.data")
     phaselookup = bsiso_phases(indexfile; ampmin)
-    comp, nobs, lon, lat = composite(phase_days(phaselookup, days); dir=era5dir(ceoasdir))
-    save_composite("ekman_bsiso1_phase_$(year(first(days)))-$(year(last(days))).nc", comp, nobs, lon, lat,
-                   "phase", 1:8;
-                   dimattrib=["long_name" => "BSISO1 phase"],
-                   attrib=["title" => "ERA5 composites of surface fields and Ekman terms by BSISO1 phase",
-                           "days" => "$(first(days)) to $(last(days))",
-                           "BSISO1_amplitude_min" => ampmin])
+    groups = phase_days(phaselookup, days)
+    yrs = "$(year(first(days)))-$(year(last(days)))"
+    dimattrib = ["long_name" => "BSISO1 phase"]
+    attrib(title) = ["title" => title, "days" => "$(first(days)) to $(last(days))",
+                     "BSISO1_amplitude_min" => ampmin]
+    if data == :oaflux
+        comp, nobs, lon, lat, units = oaflux_composite(groups; root=oafluxdir, vars)
+        save_composite("oaflux_bsiso1_phase_$yrs.nc", comp, nobs, lon, lat, "phase", 1:8;
+                       dimattrib, fieldunits=units,
+                       attrib=attrib("OAFlux composites of daily surface fluxes and meteorology by BSISO1 phase"))
+    else
+        comp, nobs, lon, lat = composite(groups; dir=era5dir(ceoasdir))
+        save_composite("ekman_bsiso1_phase_$yrs.nc", comp, nobs, lon, lat, "phase", 1:8;
+                       dimattrib,
+                       attrib=attrib("ERA5 composites of surface fields and Ekman terms by BSISO1 phase"))
+    end
     return (; comp, nobs, lon, lat)
 end
 
@@ -74,5 +91,5 @@ if abspath(PROGRAM_FILE) == @__FILE__
         addprocs(SlurmManager(); exeflags="--project=$(Base.active_project())")
     end
     @everywhere using EkmanCommon   # after the workers exist
-    main()
+    main(; data=Symbol(get(ARGS, 1, "era5"))) # e.g. julia --project -p 8 bsiso_phase.jl oaflux
 end

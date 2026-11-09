@@ -48,6 +48,7 @@ The main session runs on Opus (`.claude/settings.json`).
 ## Status
 - Tested only on synthetic ERA5-format files; not yet run on real data.
 - `rdadir` (NCAR RDA d633000 path for the iews/inss wind stress) is a placeholder relative path; point it at the real copy.
+- OAFlux daily fields (WHOI, 1°) are on the HPC in `data/oaflux/daily/` (`oafluxdir`). Turbulent fluxes and evaporation cover 1985–2022; radiation (ISCCP) and qnet cover 1985–2009. Both scripts composite them with `main(data=:oaflux)` (command-line argument `oaflux`, also through `run_slurm.sh`), 1985–2009, all variables, into `oaflux_pentad_clim_<years>.nc` and `oaflux_bsiso1_phase_<years>.nc`. `EkmanCommon.oaflux_composite` assumes one file per variable per year, with one field per day in order. Not yet run on the real files.
 - SST, t2m and d2m come from `/storage/ceoas-datasets/datasets/ERA5/staging/andrea/1hr/SFC/{sst,t2m,d2m}`.
 - Compositing uses the uncurtailed Ekman transport. The equatorial curtailment r = `curtail(lat, Ro_rad)` = 1 − exp(−y²/Ro_rad²) depends only on latitude, so it is applied in postprocessing (`ekman_fields(d; Ro_rad)`; the notebook sets `Ro_rad = 250e3` m, an ad hoc plotting choice). Results should not depend on it; it matters only within ~5° of the equator.
 

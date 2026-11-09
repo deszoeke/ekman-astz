@@ -3,6 +3,7 @@ using EkmanCommon
 
 # Pentad (5-day) climatologies of ERA5 surface fields and air-sea Ekman terms for April-July.
 #   script:  julia --project -p 8 ekman_mse.jl    or    sbatch run_slurm.sh ekman_mse.jl
+#            OAFlux instead of ERA5: julia --project -p 8 ekman_mse.jl oaflux   or   sbatch run_slurm.sh ekman_mse.jl oaflux
 #   REPL:    include("ekman_mse.jl") defines the functions only; then, for workers,
 #              addprocs(4); @everywhere using EkmanCommon
 #            and e.g. main(years=2012:2012, pentads=19:20)
@@ -14,6 +15,8 @@ using EkmanCommon
 
 # ERA5 data root, e.g. "/storage/ceoas-datasets/datasets/ERA5/staging/andrea/1hr/SFC"
 ceoasdir = "./data"
+# OAFlux daily data root (turbulence/, evaporation/, radiation/, netheat/), on the HPC in the repo
+oafluxdir = "data/oaflux/daily"
 
 "pentad (1-73) of date d, on the 365-day calendar (Feb 29 joins pentad 12)"
 pentad(d) = (dayofyear(d) - (isleapyear(d) && month(d) > 2) - 1) ÷ 5 + 1
@@ -32,17 +35,33 @@ pentad_climatology(years, pentads::UnitRange; kw...) =
     composite([[d for y in years for d in pentaddays(y, p:p)] for p in pentads]; kw...)
 
 """
-    main(; years, pentads, ceoasdir)
+    main(; data=:era5, years, pentads, ceoasdir, oafluxdir, vars)
 
 Pentad climatology: save the NetCDF file and return (comp, nobs, lon, lat). Defaults:
-April-July, pentads 19 (Apr 1-5) through 43 (Jul 30-Aug 3), years 2012-2020 (Andrea's data stops at 2020; 2026 is incomplete).
+April-July, pentads 19 (Apr 1-5) through 43 (Jul 30-Aug 3).
+`data=:era5`: ERA5 fields and Ekman terms, years 2012-2020 (Andrea's data stops at 2020),
+written to ekman_pentad_clim_<years>.nc.
+`data=:oaflux`: OAFlux daily fields `vars`, years 1985-2009 (all variables; radiation and qnet
+stop in 2009; for 1985-2022 pass vars=oaflux_turbulent), written to oaflux_pentad_clim_<years>.nc.
 """
-function main(; years=2012:2020, pentads=19:43, ceoasdir=ceoasdir)
-    comp, nobs, lon, lat = pentad_climatology(years, pentads; dir=era5dir(ceoasdir))
-    save_composite("ekman_pentad_clim_$(first(years))-$(last(years)).nc", comp, nobs, lon, lat, "pentad", pentads;
-                   dimattrib=["long_name" => "pentad of year (1-73), 365-day calendar, Feb 29 in pentad 12"],
-                   attrib=["title" => "ERA5 pentad climatology of surface fields and Ekman terms",
-                           "years" => "$(first(years))-$(last(years))"])
+function main(; data=:era5, years=(data == :oaflux ? (1985:2009) : (2012:2020)), pentads=19:43,
+                ceoasdir=ceoasdir, oafluxdir=oafluxdir, vars=keys(oaflux_files))
+    yrs = "$(first(years))-$(last(years))"
+    dimattrib = ["long_name" => "pentad of year (1-73), 365-day calendar, Feb 29 in pentad 12"]
+    if data == :oaflux
+        groups = [[d for y in years for d in pentaddays(y, p:p)] for p in pentads]
+        comp, nobs, lon, lat, units = oaflux_composite(groups; root=oafluxdir, vars)
+        save_composite("oaflux_pentad_clim_$yrs.nc", comp, nobs, lon, lat, "pentad", pentads;
+                       dimattrib, fieldunits=units,
+                       attrib=["title" => "OAFlux pentad climatology of daily surface fluxes and meteorology",
+                               "years" => yrs])
+    else
+        comp, nobs, lon, lat = pentad_climatology(years, pentads; dir=era5dir(ceoasdir))
+        save_composite("ekman_pentad_clim_$yrs.nc", comp, nobs, lon, lat, "pentad", pentads;
+                       dimattrib,
+                       attrib=["title" => "ERA5 pentad climatology of surface fields and Ekman terms",
+                               "years" => yrs])
+    end
     return (; comp, nobs, lon, lat)
 end
 
@@ -54,5 +73,5 @@ if abspath(PROGRAM_FILE) == @__FILE__
         addprocs(SlurmManager(); exeflags="--project=$(Base.active_project())")
     end
     @everywhere using EkmanCommon   # after the workers exist
-    main()
+    main(; data=Symbol(get(ARGS, 1, "era5"))) # e.g. julia --project -p 8 ekman_mse.jl oaflux
 end

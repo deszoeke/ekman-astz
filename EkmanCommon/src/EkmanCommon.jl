@@ -3,7 +3,7 @@
 
 Shared code for ekman_mse.jl and bsiso_phase.jl: ERA5 file access, thermodynamics,
 Ekman transport, finite differences on the sphere, and compositing daily fields over
-groups of days on worker processes. Load it on every process:
+groups of days on worker processes, for ERA5 (`composite`) or OAFlux (`oaflux_composite`). Load it on every process:
     @everywhere using EkmanCommon
 """
 module EkmanCommon
@@ -16,7 +16,8 @@ using PrecompileTools
 export era5dir, era5code, era5file, month_files, month_blocks, chunk_cache, daily_terms, composite_mean, composite, save_composite,
        fieldkeys, nlkeys, keys_all, scalars, c_pa, c_po, Lv, esat_buck, qsat_dew,
        coriolis, curtail, ekman_transport, ekman_transport_xy, gradient, divergence, advection,
-       dailymean, accumulate!
+       dailymean, accumulate!,
+       oaflux_files, oaflux_turbulent, oafluxfile, oaflux_mean, oaflux_composite
 
 # ERA5 hourly surface analysis from NCAR RDA d633000, one file per variable per month:
 #   <dir>/201201/e5.oper.an.sfc.128_229_iews.ll025sc.2012010100_2012013123.nc
@@ -345,6 +346,84 @@ function composite(groups; dir=era5dir(), code=era5code, scalars=scalars)
     comp, nobs, lon, lat
 end
 
+# OAFlux daily 1-degree fields (WHOI), one file per variable per year under `root`, e.g.
+#   <root>/turbulence/lh_oaflux_1985.nc, <root>/radiation/sw_isccp_1985.nc, <root>/netheat/qnet_1985.nc
+# turbulence and evaporation 1985-2022; radiation (ISCCP) and qnet 1985-2009.
+const oaflux_files = (lh="turbulence/lh_oaflux", sh="turbulence/sh_oaflux",
+                      evapr="evaporation/evapr_oaflux",
+                      qa="turbulence/qa_oaflux", ta="turbulence/ta_oaflux",
+                      ts="turbulence/ts_oaflux", ws="turbulence/ws_oaflux",
+                      lw="radiation/lw_isccp", sw="radiation/sw_isccp", qnet="netheat/qnet")
+const oaflux_turbulent = (:lh, :sh, :evapr, :qa, :ta, :ts, :ws) # the variables through 2022
+
+"OAFlux file of variable k (a key of oaflux_files) for year y under root"
+oafluxfile(root, k, y) = joinpath(root, "$(oaflux_files[k])_$y.nc")
+
+"the data variable in an OAFlux file (3 dimensions lon x lat x time; not an err field)"
+oafluxvar(ds) = first(k for k in keys(ds) if ndims(ds[k]) == 3 && !startswith(lowercase(k), "err"))
+
+"longitude and latitude of an OAFlux data variable v, from its first two dimensions"
+oafluxgrid(ds, v) = (Float64.(ds[dimnames(v)[1]][:]), Float64.(ds[dimnames(v)[2]][:]))
+
+"""
+    oaflux_mean(days, lon, lat; progress=nothing, root, vars=keys(oaflux_files))
+
+Mean over `days` of the OAFlux daily fields `vars`, like `composite_mean`: returns (mean, nobs),
+NamedTuples of lon x lat arrays, NaN where nobs is 0. Each file holds one field per day of its
+year, in order. A year with any missing file is skipped with a warning.
+"""
+function oaflux_mean(days, lon, lat; progress=nothing, root, vars=keys(oaflux_files))
+    S = NamedTuple{vars}(Tuple(zeros(length(lon), length(lat)) for k in vars))
+    N = NamedTuple{vars}(Tuple(zeros(Int16, length(lon), length(lat)) for k in vars))
+    done(n) = isnothing(progress) || foreach(_ -> put!(progress, 1), 1:n)
+    for y in unique(year.(days))
+        ydays = filter(d -> year(d) == y, days)
+        files = map(k -> oafluxfile(root, k, y), NamedTuple{vars}(vars))
+        if !all(isfile, files)
+            @warn "missing OAFlux files for $y ($(length(ydays)) days)" filter(!isfile, collect(files))
+            done(length(ydays))
+            continue
+        end
+        for k in vars
+            NCDataset(files[k]; maskingvalue=NaN) do ds
+                v = ds[oafluxvar(ds)]
+                oafluxgrid(ds, v) == (lon, lat) || error("grid of $(files[k]) differs from the first file's")
+                size(v, 3) == daysinyear(y) || error("$(files[k]) has $(size(v, 3)) days, not $(daysinyear(y))")
+                for d in ydays
+                    accumulate!(S[k], N[k], Float64.(v[:, :, dayofyear(d)]))
+                end
+            end
+        end
+        done(length(ydays))
+    end
+    map((s, n) -> s ./ n, S, N), N
+end
+
+"""
+    oaflux_composite(groups; root, vars=keys(oaflux_files))
+
+Composite OAFlux daily fields over each group of days, like `composite` for ERA5: each worker
+takes whole groups. Returns (comp, nobs, lon, lat, units); comp and nobs are NamedTuples of
+lon x lat x group arrays, units a NamedTuple of each variable's units attribute.
+"""
+function oaflux_composite(groups; root, vars=keys(oaflux_files))
+    y0 = year(first(Iterators.flatten(groups)))
+    lon, lat = NCDataset(ds -> oafluxgrid(ds, ds[oafluxvar(ds)]), oafluxfile(root, first(vars), y0))
+    units = map(NamedTuple{vars}(vars)) do k
+        NCDataset(ds -> get(ds[oafluxvar(ds)].attrib, "units", ""), oafluxfile(root, k, y0))
+    end
+    progress = RemoteChannel(() -> Channel{Int}(256))
+    total = sum(length, groups)
+    printer = @async for (n, _) in enumerate(progress)
+        print("\r$n/$total days"); flush(stdout)
+    end
+    r = pmap(days -> oaflux_mean(days, lon, lat; progress, root, vars), groups)
+    close(progress); wait(printer); println()
+    comp = map(k -> stack(ri[1][k] for ri in r), NamedTuple{vars}(vars))
+    nobs = map(k -> stack(ri[2][k] for ri in r), NamedTuple{vars}(vars))
+    comp, nobs, lon, lat, units
+end
+
 # units of the saved fields; M in kg/m/s, so M⋅∇s and s∇⋅M are in kg/m^2/s times the units of s
 const units = (taux="N m-2", tauy="N m-2", sst="K", t2="K", d2="K", q="kg kg-1",
          adv_sst="K kg m-2 s-1", adv_t2="K kg m-2 s-1", adv_q="kg m-2 s-1",
@@ -353,14 +432,15 @@ const units = (taux="N m-2", tauy="N m-2", sst="K", t2="K", d2="K", q="kg kg-1",
          sst_tauy="K N m-2", t2_tauy="K N m-2", q_tauy="N m-2")
 
 """
-    save_composite(file, comp, nobs, lon, lat, dim, dimvals; dimattrib=[], attrib=[])
+    save_composite(file, comp, nobs, lon, lat, dim, dimvals; dimattrib=[], attrib=[], fieldunits=units)
 
 Write composites to NetCDF `file` (overwritten): each field k of `comp` as Float32
 (NaN fill), and its count of daily values as Int16 `nobs_k`, on (longitude, latitude, dim),
 with coordinate `dim` = `dimvals`. `dimattrib` and `attrib` are the attributes of the
-coordinate and of the file; the history is added to the latter.
+coordinate and of the file; the history is added to the latter. `fieldunits` gives each
+field's units (default: the ERA5 fields and Ekman terms; OAFlux units come from `oaflux_composite`).
 """
-function save_composite(file, comp, nobs, lon, lat, dim, dimvals; dimattrib=[], attrib=[])
+function save_composite(file, comp, nobs, lon, lat, dim, dimvals; dimattrib=[], attrib=[], fieldunits=units)
     NCDataset(file, "c", attrib=[attrib...,
                                  "history" => "$(now()) $(basename(PROGRAM_FILE))"]) do ds
         defVar(ds, "longitude", lon, ("longitude",), attrib=["units" => "degrees_east"])
@@ -369,7 +449,7 @@ function save_composite(file, comp, nobs, lon, lat, dim, dimvals; dimattrib=[], 
         dims = ("longitude", "latitude", dim)
         for k in keys(comp)
             defVar(ds, String(k), Float32.(comp[k]), dims; fillvalue=NaN32, deflatelevel=4,
-                   attrib=["units" => get(units, k, "")])
+                   attrib=["units" => get(fieldunits, k, "")])
             defVar(ds, "nobs_$k", nobs[k], dims; deflatelevel=4,
                    attrib=["long_name" => "number of daily values in the mean of $k"])
         end
