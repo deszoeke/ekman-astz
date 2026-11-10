@@ -72,7 +72,7 @@ end
     panel(x, title, units; cmap="RdBu_r", arrows=nothing, contours=nothing, kw...)
 
 A map panel of x (lon x lat) in colors, with `arrows` (see `arrows`) and `contours` (see
-`contours`) drawn on top if given. `kw` go to pcolormesh, e.g. `vmin=-180, vmax=180`; with
+`contours`, or a vector of them, e.g. `[contours(h), contours(q)]`) drawn on top if given. `kw` go to pcolormesh, e.g. `vmin=-180, vmax=180`; with
 neither vmin nor vmax the color limits are ±symlim of the plotted (land-masked) x, and
 `vmin=nothing, vmax=nothing` lets matplotlib scale to the data.
 """
@@ -149,7 +149,8 @@ end
 
 Draw `panel` (see `panel`) on matplotlib axis `ax`: a rasterized pcolormesh of panel.x
 (lon x lat), land masked, a colorbar labelled panel.units, title panel.title, and
-panel.arrows and panel.contours if given. Returns (mesh, cbar, quiver, contourset).
+panel.arrows and panel.contours if given. Returns (mesh, cbar, quiver, contourset);
+contourset is a vector of contour sets when panel.contours is a vector.
 """
 function draw_panel!(ax, lon, lat, panel; land=nothing)
     x = isnothing(land) ? panel.x : mask(panel.x, land)
@@ -159,7 +160,9 @@ function draw_panel!(ax, lon, lat, panel; land=nothing)
     mesh = ax.pcolormesh(lon, lat, permutedims(x); panel.cmap, shading="nearest", rasterized=true, lims..., panel.kw...)
     cbar = colorbar(mesh; ax, label=panel.units)
     ax.set_title(panel.title)
-    contourset = isnothing(panel.contours) ? nothing : draw_contours!(ax, lon, lat, panel.contours; land)
+    contourset = isnothing(panel.contours) ? nothing :
+                 panel.contours isa AbstractVector ? [draw_contours!(ax, lon, lat, c; land) for c in panel.contours] :
+                 draw_contours!(ax, lon, lat, panel.contours; land)
     quiver = isnothing(panel.arrows) ? nothing : draw_arrows!(ax, lon, lat, panel.arrows; land)
     mesh, cbar, quiver, contourset
 end
