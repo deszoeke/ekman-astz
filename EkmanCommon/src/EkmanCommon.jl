@@ -3,7 +3,7 @@
 
 Shared code for ekman_mse.jl and bsiso_phase.jl: ERA5 file access, thermodynamics,
 Ekman transport, finite differences on the sphere, and compositing daily fields over
-groups of days on worker processes, for ERA5 (`composite`), OAFlux (`oaflux_composite`) or CERES (`ceres_composite`); `composite_data` picks one. Load it on every process:
+groups of days on worker processes, for ERA5 (`composite`, optionally with OISST SST), OAFlux (`oaflux_composite`) or CERES (`ceres_composite`); `composite_data` picks one. Load it on every process:
     @everywhere using EkmanCommon
 """
 module EkmanCommon
@@ -18,7 +18,8 @@ export era5dir, era5code, era5file, month_files, month_blocks, chunk_cache, dail
        coriolis, curtail, ekman_transport, ekman_transport_xy, gradient, divergence, advection,
        dailymean, accumulate!,
        oaflux_files, oaflux_turbulent, oafluxfile, oaflux_mean, oaflux_composite,
-       ceres_vars, ceresfiles, ceres_mean, ceres_composite, pmap_groups, composite_data
+       ceres_vars, ceresfiles, ceres_mean, ceres_composite, pmap_groups, composite_data,
+       oisstfile, oisst_sst
 
 # ERA5 hourly surface analysis from NCAR RDA d633000, one file per variable per month:
 #   <dir>/201201/e5.oper.an.sfc.128_229_iews.ll025sc.2012010100_2012013123.nc
@@ -250,14 +251,15 @@ function accumulate!(S, N, x)
 end
 
 """
-    daily_terms(ds, times, d, lon, lat; scalars=scalars)
+    daily_terms(ds, times, d, lon, lat; scalars=scalars, sst=nothing)
 
 Daily means (lon x lat) on date d of the ERA5 fields, q from hourly dewpoint, and the
 nonlinear Ekman terms computed from them (uncurtailed M), as a NamedTuple with keys `keys_all`.
 `ds` are the month's open datasets (see `withdatasets`) and `times` their dates, one per hour.
+`sst` (lon x lat, K), e.g. OISST, replaces the daily mean ERA5 SST, which `ds` then need not hold.
 Returns nothing, with a warning, if hours for d are missing.
 """
-function daily_terms(ds, times, d, lon, lat; scalars=scalars)
+function daily_terms(ds, times, d, lon, lat; scalars=scalars, sst=nothing)
     it = map(t -> asrange(findall(==(d), t)), times)
     if any(isempty, it)
         @warn "missing hours on $d"
@@ -266,7 +268,8 @@ function daily_terms(ds, times, d, lon, lat; scalars=scalars)
     # average hourly data to daily; q from hourly dewpoint, then daily mean
     hours(k) = ds[k][datavar(ds[k])][:, :, it[k]]
     hd2 = hours(:d2)
-    x = (taux=dailymean(hours(:taux)), tauy=dailymean(hours(:tauy)), sst=dailymean(hours(:sst)),
+    x = (taux=dailymean(hours(:taux)), tauy=dailymean(hours(:tauy)),
+         sst=isnothing(sst) ? dailymean(hours(:sst)) : sst,
          t2=dailymean(hours(:t2)), d2=dailymean(hd2), q=dailymean(hd2, qsat_dew))
     # daily Ekman transport (uncurtailed; Inf at f = 0) and its divergence
     Mx, My = ekman_transport_xy(x.taux, x.tauy, lat)
@@ -282,19 +285,23 @@ function daily_terms(ds, times, d, lon, lat; scalars=scalars)
 end
 
 """
-    composite_mean(days, lon, lat; progress=nothing, dir=era5dir(), code=era5code, scalars=scalars)
+    composite_mean(days, lon, lat; progress=nothing, dir=era5dir(), code=era5code, scalars=scalars, oisst=nothing)
 
 Mean over `days` of the finite daily values (see `daily_terms`). The days are read a month
 at a time: each month's files are opened once, with a chunk cache (`chunk_cache`), and its
 days read from them in order. Returns (mean, nobs), NamedTuples of lon x lat arrays; the
 mean is NaN where nobs is 0. If `progress` is a channel, put 1 on it as each day finishes.
+With `oisst` (the OISST root directory), SST is the daily OISST on the ERA5 grid (`oisst_sst`)
+instead of ERA5's, whose files are then not read; a day without an OISST file is skipped.
 """
-function composite_mean(days, lon, lat; progress=nothing, dir=era5dir(), code=era5code, scalars=scalars)
+function composite_mean(days, lon, lat; progress=nothing, dir=era5dir(), code=era5code, scalars=scalars,
+                        oisst=nothing)
     S = NamedTuple{keys_all}(Tuple(zeros(length(lon), length(lat)) for k in keys_all))
     N = NamedTuple{keys_all}(Tuple(zeros(Int16, length(lon), length(lat)) for k in keys_all))
     done(n) = isnothing(progress) || foreach(_ -> put!(progress, 1), 1:n)
     for mdays in month_blocks(days)
         files = month_files(first(mdays); dir, code)
+        isnothing(oisst) || (files = Base.structdiff(files, NamedTuple{(:sst,)}))
         if !all(isfile, files)
             @warn "missing ERA5 files for $(Dates.format(first(mdays), "yyyy-mm")) ($(length(mdays)) days)" filter(!isfile, collect(files))
             done(length(mdays))
@@ -308,7 +315,17 @@ function composite_mean(days, lon, lat; progress=nothing, dir=era5dir(), code=er
             end
             times = map(f -> Date.(f[timevar(f)][:]), ds) # sst: valid_time
             for d in mdays
-                x = daily_terms(ds, times, d, lon, lat; scalars)
+                sst = nothing
+                if !isnothing(oisst)
+                    f = oisstfile(oisst, d)
+                    if !isfile(f)
+                        @warn "missing OISST file $f"
+                        done(1)
+                        continue
+                    end
+                    sst = oisst_sst(f, lon, lat)
+                end
+                x = daily_terms(ds, times, d, lon, lat; scalars, sst)
                 isnothing(x) || foreach(accumulate!, S, N, x)
                 done(1)
             end
@@ -318,16 +335,17 @@ function composite_mean(days, lon, lat; progress=nothing, dir=era5dir(), code=er
 end
 
 """
-    composite(groups; dir=era5dir(), code=era5code, scalars=scalars)
+    composite(groups; dir=era5dir(), code=era5code, scalars=scalars, oisst=nothing)
 
 Composite means (lon x lat x group) of the ERA5 fields and the nonlinear Ekman terms,
 one for each vector of dates in `groups`. Means are taken over the finite daily values
 at each grid point, so a missing hour or a land point drops out of that point's mean
 instead of making it NaN. The groups are distributed over the worker processes, each
 worker summing whole groups, so no two processes share an accumulator. Progress is a
-counter of finished days, redrawn in place. Returns (comp, nobs, lon, lat).
+counter of finished days, redrawn in place. With `oisst` (root directory), SST is the daily
+OISST (see `composite_mean`). Returns (comp, nobs, lon, lat).
 """
-function composite(groups; dir=era5dir(), code=era5code, scalars=scalars)
+function composite(groups; dir=era5dir(), code=era5code, scalars=scalars, oisst=nothing)
     lon, lat = NCDataset(era5file(dir.taux, code.taux, first(Iterators.flatten(groups)))) do ds
         Float64.(ds["longitude"][:]), Float64.(ds["latitude"][:])
     end
@@ -338,13 +356,54 @@ function composite(groups; dir=era5dir(), code=era5code, scalars=scalars)
         print("\r$n/$total days"); flush(stdout)
     end
     r = pmap(days -> composite_mean(days, lon, lat; progress=progress,
-                                    dir=dir, code=code, scalars=scalars),
+                                    dir=dir, code=code, scalars=scalars, oisst=oisst),
              groups)
     close(progress); wait(printer); println()
     # stack the groups (lon x lat x group)
     comp = map(k -> stack(ri[1][k] for ri in r), NamedTuple{keys_all}(keys_all))
     nobs = map(k -> stack(ri[2][k] for ri in r), NamedTuple{keys_all}(keys_all))
     comp, nobs, lon, lat
+end
+
+# NOAA OISST v2.1 (AVHRR-only) daily SST, 0.25 degrees, one file per day:
+#   <root>/YYYY/oisst-avhrr-v02r01.YYYYMMDD.nc, variable sst (lon, lat, zlev, time) in Celsius,
+# on cell centres 0.125:0.25:359.875 E, -89.875:0.25:89.875 N, offset by 1/8 degree from ERA5's
+# 0:0.25:359.75 E, 90:-0.25:-90 N.
+
+"OISST v2.1 file for date d under root"
+oisstfile(root, d) = joinpath(root, Dates.format(d, "yyyy"), "oisst-avhrr-v02r01.$(Dates.format(d, "yyyymmdd")).nc")
+
+"""
+    oisst_sst(file, lon, lat)
+
+Daily OISST SST (K) in `file` on the ERA5 grid `lon`, `lat`: each ERA5 point is the corner of
+four OISST cells, and gets the mean of those that are ocean (finite), so coastal points keep
+the available ocean SST; NaN where none is. The grids are checked.
+"""
+function oisst_sst(file, lon, lat)
+    ongrid(x, r) = length(x) == length(r) && x ≈ r
+    ongrid(lon, 0:0.25:359.75) && ongrid(lat, 90:-0.25:-90) || error("oisst_sst: lon, lat are not the ERA5 0.25 degree grid")
+    so, kelvin = NCDataset(file; maskingvalue=NaN) do ds
+        ongrid(ds["lon"][:], 0.125:0.25:359.875) && ongrid(ds["lat"][:], -89.875:0.25:89.875) ||
+            error("$file is not on the OISST 0.25 degree grid")
+        v = ds["sst"]
+        Float64.(v[:, :, 1, 1]), occursin(r"^(K|kelvin)$"i, get(v.attrib, "units", ""))
+    end
+    kelvin || (so .+= 273.15) # Celsius to K
+    nx, ny = size(so)
+    out = fill(NaN, length(lon), length(lat))
+    for (j, φ) in enumerate(lat), (i, λ) in enumerate(lon)
+        i1 = mod1(round(Int, λ/0.25), nx)    # OISST cells west and east of λ (wrapping at 0 E)
+        k1 = round(Int, (φ + 90)/0.25)        # OISST cells south (k1) and north (k1 + 1) of φ
+        s, n = 0.0, 0
+        for ii in (i1, mod1(i1 + 1, nx)), kk in (k1, k1 + 1)
+            if 1 <= kk <= ny && isfinite(so[ii, kk])
+                s += so[ii, kk]; n += 1
+            end
+        end
+        n > 0 && (out[i, j] = s/n)
+    end
+    out
 end
 
 # OAFlux daily 1-degree fields (WHOI), one file per variable per year under `root`, e.g.
@@ -513,10 +572,11 @@ function ceres_composite(groups; root, vars=keys(ceres_vars))
 end
 
 """
-    composite_data(data, groups; era5root, oafluxroot, ceresroot)
+    composite_data(data, groups; era5root, oafluxroot, ceresroot, oisstroot=nothing)
 
 Composite each group of days of the data set `data`, each in its own run and file:
 `:era5`: ERA5 fields and Ekman terms (`composite`), from era5dir(era5root);
+`:era5oisst`: the same, with daily OISST (from oisstroot) for SST, on the ERA5 grid;
 `:oaflux`: all OAFlux fields, with ISCCP radiation and qnet (through 2009);
 `:oafluxturb`: the OAFlux turbulent fields only (through 2022);
 `:ceres`: CERES SYN1deg adjusted all-sky surface and TOA radiative fluxes (from March 2000).
@@ -524,9 +584,12 @@ OAFlux and CERES composites of the same days can be combined after compositing (
 Returns (comp, nobs, lon, lat, units, prefix, title); prefix and title name the data in the
 output file name and title.
 """
-function composite_data(data, groups; era5root, oafluxroot, ceresroot)
+function composite_data(data, groups; era5root, oafluxroot, ceresroot, oisstroot=nothing)
     if data == :era5
         (composite(groups; dir=era5dir(era5root))..., units, "ekman", "ERA5 surface fields and Ekman terms")
+    elseif data == :era5oisst
+        (composite(groups; dir=era5dir(era5root), oisst=oisstroot)..., units,
+         "ekman_oisst", "ERA5 surface fields with OISST v2.1 SST, and Ekman terms")
     elseif data == :oaflux
         (oaflux_composite(groups; root=oafluxroot)..., "oaflux", "OAFlux daily surface fluxes and meteorology")
     elseif data == :oafluxturb
@@ -536,7 +599,7 @@ function composite_data(data, groups; era5root, oafluxroot, ceresroot)
         (ceres_composite(groups; root=ceresroot)...,
          "ceres", "CERES SYN1deg daily adjusted all-sky surface and TOA radiative fluxes")
     else
-        error("data must be :era5, :oaflux, :oafluxturb or :ceres, not :$data")
+        error("data must be :era5, :era5oisst, :oaflux, :oafluxturb or :ceres, not :$data")
     end
 end
 

@@ -3,7 +3,7 @@ using EkmanCommon
 
 # Composites of ERA5 surface fields and air-sea Ekman terms by BSISO1 phase (1-8).
 #   script:  julia --project -p 8 bsiso_phase.jl    or    sbatch --nodes=1 --ntasks-per-node=8 run_slurm.sh bsiso_phase.jl
-#            other data: add the argument oaflux, oafluxturb or ceres, e.g. sbatch run_slurm.sh bsiso_phase.jl ceres
+#            other data: add the argument era5oisst, oaflux, oafluxturb or ceres, e.g. sbatch run_slurm.sh bsiso_phase.jl ceres
 #   REPL:    include("bsiso_phase.jl") defines the functions only; then, for workers,
 #              addprocs(4); @everywhere using EkmanCommon
 #            and e.g. main(days=Date(2012,1,1):Day(1):Date(2012,3,31))
@@ -19,10 +19,13 @@ ceoasdir = "./data"
 oafluxdir = "data/oaflux/daily"
 # CERES SYN1deg-Day files (CERES_SYN1deg-Day_*.nc), on the HPC in the repo
 ceresdir = "data/ceres/adjusted" # symlink to /storage/ceoas-datasets/datasets/ERA5/staging/simon/ceres/adjusted
+# NOAA OISST v2.1 daily SST files (YYYY/oisst-avhrr-v02r01.YYYYMMDD.nc), 1981-present, on the HPC in the repo
+oisstdir = "data/oisst"
 # days of each data set: ERA5 (Andrea's data stop at 2020); all OAFlux variables (radiation
 # and qnet stop at 2009); OAFlux turbulent fields and CERES radiation over the same days, to be
 # combined after compositing (CERES starts on 2000-03-01; from 2000-04-01, as the pentad climatology; OAFlux turbulence stops in 2022)
-default_days = (era5=Date(2012,1,1):Day(1):Date(2020,12,31), oaflux=Date(1985,1,1):Day(1):Date(2009,12,31),
+default_days = (era5=Date(2012,1,1):Day(1):Date(2020,12,31), era5oisst=Date(2012,1,1):Day(1):Date(2020,12,31),
+                oaflux=Date(1985,1,1):Day(1):Date(2009,12,31),
                 oafluxturb=Date(2000,4,1):Day(1):Date(2022,12,31), ceres=Date(2000,4,1):Day(1):Date(2022,12,31))
 
 "convert PC1, PC2 components of BSISO into canonical phase index (1-8)"
@@ -65,12 +68,12 @@ Composite the data set `data` (see `composite_data`) by BSISO1 phase over `days`
 (comp, nobs, lon, lat).
 """
 function main(; data=:era5, days=default_days[data], ampmin=1.0,
-                ceoasdir=ceoasdir, oafluxdir=oafluxdir, ceresdir=ceresdir,
+                ceoasdir=ceoasdir, oafluxdir=oafluxdir, ceresdir=ceresdir, oisstdir=oisstdir,
                 indexfile="data/BSISO.INDEX.NORM.LY.data")
     phaselookup = bsiso_phases(indexfile; ampmin)
     comp, nobs, lon, lat, units, prefix, title =
         composite_data(data, phase_days(phaselookup, days);
-                       era5root=ceoasdir, oafluxroot=oafluxdir, ceresroot=ceresdir)
+                       era5root=ceoasdir, oafluxroot=oafluxdir, ceresroot=ceresdir, oisstroot=oisstdir)
     ymd(d) = Dates.format(d, "yyyymmdd")
     save_composite("$(prefix)_bsiso1_phase_$(ymd(first(days)))-$(ymd(last(days))).nc",
                    comp, nobs, lon, lat, "phase", 1:8;

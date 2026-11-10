@@ -3,7 +3,8 @@ using EkmanCommon
 
 # Pentad (5-day) climatologies of ERA5 surface fields and air-sea Ekman terms for April-July.
 #   script:  julia --project -p 8 ekman_mse.jl    or    sbatch run_slurm.sh ekman_mse.jl
-#            other data (oaflux, oafluxturb, ceres): julia --project -p 8 ekman_mse.jl ceres   or   sbatch run_slurm.sh ekman_mse.jl ceres
+#            other data (era5oisst, oaflux, oafluxturb, ceres): julia --project -p 8 ekman_mse.jl ceres   or   sbatch run_slurm.sh ekman_mse.jl ceres
+#            years, and one file per year: sbatch run_slurm.sh ekman_mse.jl era5oisst 2023 2025 peryear
 #   REPL:    include("ekman_mse.jl") defines the functions only; then, for workers,
 #              addprocs(4); @everywhere using EkmanCommon
 #            and e.g. main(years=2012:2012, pentads=19:20)
@@ -19,10 +20,12 @@ ceoasdir = "./data"
 oafluxdir = "data/oaflux/daily"
 # CERES SYN1deg-Day files (CERES_SYN1deg-Day_*.nc), on the HPC in the repo
 ceresdir = "data/ceres/adjusted" # symlink to /storage/ceoas-datasets/datasets/ERA5/staging/simon/ceres/adjusted
+# NOAA OISST v2.1 daily SST files (YYYY/oisst-avhrr-v02r01.YYYYMMDD.nc), 1981-present, on the HPC in the repo
+oisstdir = "data/oisst"
 # years of each data set: ERA5 (Andrea's data stop at 2020); all OAFlux variables (radiation
 # and qnet stop at 2009); OAFlux turbulent fields and CERES radiation over the same years, to be
 # combined after compositing (CERES starts in March 2000, OAFlux turbulence stops in 2022)
-default_years = (era5=2012:2020, oaflux=1985:2009, oafluxturb=2000:2022, ceres=2000:2022) # 2000: from April 1 (pentad 19)
+default_years = (era5=2012:2020, era5oisst=2012:2020, oaflux=1985:2009, oafluxturb=2000:2022, ceres=2000:2022) # 2000: from April 1 (pentad 19)
 
 "pentad (1-73) of date d, on the 365-day calendar (Feb 29 joins pentad 12)"
 pentad(d) = (dayofyear(d) - (isleapyear(d) && month(d) > 2) - 1) ÷ 5 + 1
@@ -48,10 +51,11 @@ Pentad climatology of the data set `data` (see `composite_data`): save the NetCD
 April-July, 19 (Apr 1-5) through 43 (Jul 30-Aug 3); years to `default_years[data]`.
 """
 function main(; data=:era5, years=default_years[data], pentads=19:43,
-                ceoasdir=ceoasdir, oafluxdir=oafluxdir, ceresdir=ceresdir)
+                ceoasdir=ceoasdir, oafluxdir=oafluxdir, ceresdir=ceresdir, oisstdir=oisstdir)
     groups = [[d for y in years for d in pentaddays(y, p:p)] for p in pentads]
     comp, nobs, lon, lat, units, prefix, title =
-        composite_data(data, groups; era5root=ceoasdir, oafluxroot=oafluxdir, ceresroot=ceresdir)
+        composite_data(data, groups; era5root=ceoasdir, oafluxroot=oafluxdir, ceresroot=ceresdir,
+                       oisstroot=oisstdir)
     yrs = "$(first(years))-$(last(years))"
     day0, day1 = minimum(minimum, groups), maximum(maximum, groups) # period of the composite
     ymd(d) = Dates.format(d, "yyyymmdd")
@@ -72,5 +76,12 @@ if abspath(PROGRAM_FILE) == @__FILE__
         addprocs(SlurmManager(); exeflags="--project=$(Base.active_project())")
     end
     @everywhere using EkmanCommon   # after the workers exist
-    main(; data=Symbol(get(ARGS, 1, "era5"))) # e.g. julia --project -p 8 ekman_mse.jl oaflux
+    # arguments: data [first_year last_year [peryear]], e.g. ekman_mse.jl era5oisst 2023 2025 peryear
+    data = Symbol(get(ARGS, 1, "era5"))
+    years = length(ARGS) >= 3 ? (parse(Int, ARGS[2]):parse(Int, ARGS[3])) : default_years[data]
+    if get(ARGS, 4, "") == "peryear" # a climatology of each year, each in its own file
+        foreach(y -> main(; data, years=y:y), years)
+    else
+        main(; data, years)
+    end
 end
