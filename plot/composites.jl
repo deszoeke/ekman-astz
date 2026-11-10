@@ -107,7 +107,7 @@ dqsat_dT(T; dT=0.01) = (qsat_dew(T + dT) - qsat_dew(T - dT)) / 2dT
 Fields to plot from composites `d` (`read_group`, `read_mean`, `read_period`, `read_phase`),
 with the Ekman transport curtailed within ~`Ro_rad` (m) of the equator by
 r = curtail(lat, Ro_rad), as a NamedTuple (lon x lat arrays, or lon x lat x group when d is):
-SST sst (K); wind stress taux, tauy (N/m^2, not curtailed); Mx, My (kg/m/s); h_a, h_o (J/kg); their
+SST sst, 2 m air temperature t2 (K), specific humidity q (kg/kg); wind stress taux, tauy (N/m^2, not curtailed); Mx, My (kg/m/s); h_a, h_o (J/kg); their
 gradients dhodx, dhody, dhadx, dhady (J/kg/m); Ekman advection of temperature advT_o (SST),
 advT_a (t2) in K kg/m^2/s, and, in W/m^2, Ekman advection adv_o, adv_a, s times transport
 divergence sdiv_o, sdiv_a, and flux-form tendency flux_o, flux_a; for the air-sea transition
@@ -145,7 +145,7 @@ function ekman_fields(d; Ro_rad)
     adv_star = rx(@. (c_pa + Lv*dqsat_dT(d.sst)) * d.adv_sst) # -M_o⋅∇h_*
     adv_ha_prime = adv_star + adv_a # -M_o⋅∇h'_a = -M_o⋅∇h_* + M_o⋅∇h_a (M_a = -M_o), the remainder of the ASTZ sum
     land = isnan.(selectdim(d.sst, 3, 1)) # lon x lat for 2-D and 3-D d
-    (; d.lon, d.lat, d.sst, d.taux, d.tauy, Mx, My, h_a, h_o, dhodx, dhody, dhadx, dhady,
+    (; d.lon, d.lat, d.sst, d.t2, d.q, d.taux, d.tauy, Mx, My, h_a, h_o, dhodx, dhody, dhadx, dhady,
        advT_o, advT_a, adv_o, adv_a, sdiv_o, sdiv_a, flux_o, flux_a,
        h_star, ha_prime, adv_star, adv_ha_prime, r, land, d.dim, d.dimval)
 end

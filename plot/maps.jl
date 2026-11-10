@@ -201,3 +201,4 @@ stress_arrows(f; scale=0.25, key=0.1, kw...) =
 SST `contours` of f.sst in °C. `kw` go to `contours`.
 """
 sst_contours(f; levels=24:0.5:31, colors="0.25", kw...) = contours(f.sst .- 273.15; levels, colors, kw...)
+
