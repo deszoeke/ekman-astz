@@ -582,27 +582,28 @@ product `sst`: `:oisst` (default), daily OISST v2.1 from oisstroot on the ERA5 g
 `:oafluxturb`: the OAFlux turbulent fields only (through 2022);
 `:ceres`: CERES SYN1deg adjusted all-sky surface and TOA radiative fluxes (from March 2000).
 OAFlux and CERES composites of the same days can be combined after compositing (same grid).
-Returns (comp, nobs, lon, lat, units, prefix, title); prefix and title name the data in the
-output file name and title.
+Returns (comp, nobs, lon, lat, units, prefix, sstname, title): prefix names the data set
+and sstname the SST product ("oisst", "e5sst"; "" for data sets that use neither) in the
+output file name, <prefix>_<grouping>_<sstname>_<period>.nc, and title in its title.
 """
 function composite_data(data, groups; sst=:oisst, era5root, oafluxroot, ceresroot, oisstroot=nothing)
     if data == :era5 && sst == :oisst
         isnothing(oisstroot) && error("SST :oisst needs oisstroot, the OISST directory")
         (composite(groups; dir=era5dir(era5root), oisst=oisstroot)..., units,
-         "ekman_oisst", "ERA5 surface fields with OISST v2.1 SST, and Ekman terms")
+         "ekman", "oisst", "ERA5 surface fields with OISST v2.1 SST, and Ekman terms")
     elseif data == :era5 && sst == :e5sst
         (composite(groups; dir=era5dir(era5root))..., units,
-         "ekman_e5sst", "ERA5 surface fields with ERA5 SST, and Ekman terms")
+         "ekman", "e5sst", "ERA5 surface fields with ERA5 SST, and Ekman terms")
     elseif data == :era5
         error("sst must be :oisst or :e5sst, not :$sst")
     elseif data == :oaflux
-        (oaflux_composite(groups; root=oafluxroot)..., "oaflux", "OAFlux daily surface fluxes and meteorology")
+        (oaflux_composite(groups; root=oafluxroot)..., "oaflux", "", "OAFlux daily surface fluxes and meteorology")
     elseif data == :oafluxturb
         (oaflux_composite(groups; root=oafluxroot, vars=oaflux_turbulent)...,
-         "oafluxturb", "OAFlux daily turbulent fluxes and meteorology")
+         "oafluxturb", "", "OAFlux daily turbulent fluxes and meteorology")
     elseif data == :ceres
         (ceres_composite(groups; root=ceresroot)...,
-         "ceres", "CERES SYN1deg daily adjusted all-sky surface and TOA radiative fluxes")
+         "ceres", "", "CERES SYN1deg daily adjusted all-sky surface and TOA radiative fluxes")
     else
         error("data must be :era5, :oaflux, :oafluxturb or :ceres, not :$data")
     end

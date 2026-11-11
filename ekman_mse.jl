@@ -54,20 +54,22 @@ pentad_climatology(years, pentads::UnitRange; kw...) =
     main(; data=:era5, sst=:oisst, years, pentads, ceoasdir, oafluxdir, ceresdir, oisstdir)
 
 Pentad climatology of the data set `data` with SST product `sst` (see `composite_data`):
-save the NetCDF file <prefix>_pentad_clim_<first_day>-<last_day>.nc (yyyymmdd) and return
+save the NetCDF file <prefix>_pentad_clim_<sstname>_<first_day>-<last_day>.nc (yyyymmdd; no
+<sstname>_ for data sets without an SST product) and return
 (comp, nobs, lon, lat). Pentads default to April-July, 19 (Apr 1-5) through 43 (Jul 30-Aug 3);
 years to `default_years(data, sst)`.
 """
 function main(; data=:era5, sst=:oisst, years=default_years(data, sst), pentads=19:43,
                 ceoasdir=ceoasdir, oafluxdir=oafluxdir, ceresdir=ceresdir, oisstdir=oisstdir)
     groups = [[d for y in years for d in pentaddays(y, p:p)] for p in pentads]
-    comp, nobs, lon, lat, units, prefix, title =
+    comp, nobs, lon, lat, units, prefix, sstname, title =
         composite_data(data, groups; sst, era5root=ceoasdir, oafluxroot=oafluxdir, ceresroot=ceresdir,
                        oisstroot=oisstdir)
     yrs = "$(first(years))-$(last(years))"
     day0, day1 = minimum(minimum, groups), maximum(maximum, groups) # period of the composite
     ymd(d) = Dates.format(d, "yyyymmdd")
-    save_composite("$(prefix)_pentad_clim_$(ymd(day0))-$(ymd(day1)).nc", comp, nobs, lon, lat, "pentad", pentads;
+    sstpart = isempty(sstname) ? "" : "$(sstname)_"
+    save_composite("$(prefix)_pentad_clim_$(sstpart)$(ymd(day0))-$(ymd(day1)).nc", comp, nobs, lon, lat, "pentad", pentads;
                    dimattrib=["long_name" => "pentad of year (1-73), 365-day calendar, Feb 29 in pentad 12"],
                    fieldunits=units,
                    attrib=["title" => "$title: pentad climatology", "years" => yrs,

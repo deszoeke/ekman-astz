@@ -71,18 +71,20 @@ phase_days(phaselookup, days) = [filter(d -> get(phaselookup, d, 0) == p, days) 
     main(; data=:era5, sst=:oisst, days, ampmin, ceoasdir, oafluxdir, ceresdir, oisstdir, indexfile)
 
 Composite the data set `data` with SST product `sst` (see `composite_data`) by BSISO1 phase
-over `days` (default `default_days(data, sst)`), save the NetCDF file <prefix>_bsiso1_phase_<first_day>-<last_day>.nc (yyyymmdd), and return
+over `days` (default `default_days(data, sst)`), save the NetCDF file <prefix>_bsiso1_phase_<sstname>_<first_day>-<last_day>.nc (yyyymmdd; no
+<sstname>_ for data sets without an SST product), and return
 (comp, nobs, lon, lat).
 """
 function main(; data=:era5, sst=:oisst, days=default_days(data, sst), ampmin=1.0,
                 ceoasdir=ceoasdir, oafluxdir=oafluxdir, ceresdir=ceresdir, oisstdir=oisstdir,
                 indexfile="data/BSISO.INDEX.NORM.LY.data")
     phaselookup = bsiso_phases(indexfile; ampmin)
-    comp, nobs, lon, lat, units, prefix, title =
+    comp, nobs, lon, lat, units, prefix, sstname, title =
         composite_data(data, phase_days(phaselookup, days); sst,
                        era5root=ceoasdir, oafluxroot=oafluxdir, ceresroot=ceresdir, oisstroot=oisstdir)
     ymd(d) = Dates.format(d, "yyyymmdd")
-    save_composite("$(prefix)_bsiso1_phase_$(ymd(first(days)))-$(ymd(last(days))).nc",
+    sstpart = isempty(sstname) ? "" : "$(sstname)_"
+    save_composite("$(prefix)_bsiso1_phase_$(sstpart)$(ymd(first(days)))-$(ymd(last(days))).nc",
                    comp, nobs, lon, lat, "phase", 1:8;
                    dimattrib=["long_name" => "BSISO1 phase"], fieldunits=units,
                    attrib=["title" => "$title: composites by BSISO1 phase",
