@@ -80,16 +80,18 @@ panel(x, title, units; cmap="RdBu_r", arrows=nothing, contours=nothing, kw...) =
     (; x, title, units, cmap, arrows, contours, kw=NamedTuple(kw))
 
 """
-    arrows(u, v; every=12, scale=0.25, key=nothing, keylabel="", keypos=(0.9, 0.08), kw...)
+    arrows(u, v; grid=nothing, every=12, scale=0.25, key=nothing, keylabel="", keypos=(0.9, 0.08), kw...)
 
-Vectors (u, v) (lon x lat) for `panel(...; arrows)`: every `every`-th grid point in each
+Vectors (u, v) (lon x lat) for `panel(...; arrows)`, on the panel's grid, or on their own
+`grid` = (; lon, lat, land) if given (land may be nothing), e.g. 0.25° wind stress on a 1°
+map: every `every`-th grid point in each
 direction, `scale` data units per inch of arrow (smaller is longer; the same on every panel
 and figure), and a key arrow of length `key` labelled `keylabel` at `keypos` (axes fraction,
 (1, 1) is the upper right corner; label above the arrow) if `key` is given. `kw` go to
 quiver, e.g. `color="w", width=0.003`. Drawn by `draw_arrows!`.
 """
-arrows(u, v; every=12, scale=0.25, key=nothing, keylabel="", keypos=(0.9, 0.08), kw...) =
-    (; u, v, every, scale, key, keylabel, keypos, kw=NamedTuple(kw))
+arrows(u, v; grid=nothing, every=12, scale=0.25, key=nothing, keylabel="", keypos=(0.9, 0.08), kw...) =
+    (; u, v, grid, every, scale, key, keylabel, keypos, kw=NamedTuple(kw))
 
 """
     contours(x; levels=nothing, colors="k", linewidths=0.7, label=true, fmt="%g", kw...)
@@ -176,8 +178,9 @@ function draw_contours!(ax, lon, lat, contours; land=nothing)
     contourset
 end
 
-"draw `arrows` (see `arrows`) on axis ax, land masked, with the key at arrows.keypos; returns the quiver"
+"draw `arrows` (see `arrows`) on axis ax, land masked, on arrows.grid if given, with the key at arrows.keypos; returns the quiver"
 function draw_arrows!(ax, lon, lat, arrows; land=nothing)
+    isnothing(arrows.grid) || ((; lon, lat, land) = arrows.grid)
     i, j = 1:arrows.every:length(lon), 1:arrows.every:length(lat)
     thin(x) = permutedims((isnothing(land) ? x : mask(x, land))[i, j])
     quiver = ax.quiver(lon[i], lat[j], thin(arrows.u), thin(arrows.v); arrows.scale, scale_units="inches", arrows.kw...)
@@ -192,11 +195,12 @@ end
 """
     stress_arrows(f; scale=0.25, key=0.1, kw...)
 
-Wind stress `arrows` of f.taux, f.tauy: `scale` N m^-2 per inch (smaller is longer), and a
-key arrow of `key` N m^-2, labelled. `kw` go to `arrows`, e.g. `keypos=(0.9, 0.85)`, `every=8`.
+Wind stress `arrows` of f.taux, f.tauy on f's grid (so they can go on a map of another grid,
+e.g. the 1° fluxes): `scale` N m^-2 per inch (smaller is longer), and a key arrow of `key`
+N m^-2, labelled. `kw` go to `arrows`, e.g. `keypos=(0.9, 0.85)`, `every=8`.
 """
 stress_arrows(f; scale=0.25, key=0.1, kw...) =
-    arrows(f.taux, f.tauy; scale, key, keylabel="$key " * tau_units, kw...)
+    arrows(f.taux, f.tauy; grid=(; f.lon, f.lat, f.land), scale, key, keylabel="$key " * tau_units, kw...)
 
 """
     sst_contours(f; levels=24:0.5:31, colors="0.25", kw...)

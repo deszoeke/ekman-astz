@@ -41,7 +41,7 @@ vector k, e.g. 1:8, each variable is lon x lat x group, indexed d.taux[:, :, q].
 """
 function read_group(file, k; vars=composite_vars, lonlim=nothing, latlim=nothing)
     NCDataset(file; maskingvalue=NaN) do ds
-        dim = last(dimnames(ds["taux"]))
+        dim = group_dim(ds)
         inlim(x, lim) = isnothing(lim) ? (1:length(x)) : (r = findall(v -> lim[1] <= v <= lim[2], x); first(r):last(r))
         i = inlim(ds["longitude"][:], lonlim)
         j = inlim(ds["latitude"][:], latlim)
@@ -50,6 +50,9 @@ function read_group(file, k; vars=composite_vars, lonlim=nothing, latlim=nothing
            dim, dimval=ds[dim][k], file, k)
     end
 end
+
+"name of the group dimension (pentad or phase) of open composite file ds: the last dimension of its 3-D variables"
+group_dim(ds) = last(dimnames(ds[first(k for k in keys(ds) if ndims(ds[k]) == 3)]))
 
 """
     composite_file(stem, years; dir="../out")
@@ -75,7 +78,7 @@ end
 
 "name and values of the group dimension of a composite file, e.g. (\"phase\", [1, ..., 8])"
 group_values(file) = NCDataset(file) do ds
-    dim = last(dimnames(ds["taux"]))
+    dim = group_dim(ds)
     dim, ds[dim][:]
 end
 
@@ -224,6 +227,32 @@ E.g. May 1-30: `ekman_fields(file, Date(2001, 5, 1), Date(2001, 5, 31); n=6, lon
 """
 ekman_fields(file, first_day::Date, last_day::Date; n=nothing, lonlim=nothing, latlim=nothing, Ro_rad) =
     ekman_fields(read_period(file, first_day, last_day; n, lonlim, latlim); Ro_rad)
+
+"""
+    flux_fields(turbfile, radfile, first_day::Date, last_day::Date; n=nothing, lonlim=nothing, latlim=nothing)
+
+Surface heat fluxes, positive from ocean to atmosphere (W/m^2), averaged over the pentads
+`pentads_for(first_day, last_day; n)` of an OAFlux turbulent composite file `turbfile`
+(lh, sh, positive upward; ts, SST in °C) and a CERES composite file `radfile` (surface
+sw_dn, sw_up, lw_dn, lw_up, positive magnitudes) on the same grid and over the same days
+(errors if the files' first_day/last_day differ). Returns a NamedTuple: lh, sh, turb = lh + sh;
+sw = sw_dn - sw_up (net shortwave into the ocean), lw = lw_up - lw_dn (net longwave out of the
+ocean), rad = lw - sw; net Q = turb + rad; ts; land (true where lh is NaN; OAFlux is
+ocean only); lon, lat, dim, dimval.
+"""
+function flux_fields(turbfile, radfile, first_day::Date, last_day::Date; n=nothing, lonlim=nothing, latlim=nothing)
+    period(f) = NCDataset(ds -> (ds.attrib["first_day"], ds.attrib["last_day"]), f)
+    period(turbfile) == period(radfile) ||
+        error("different periods: $turbfile $(period(turbfile)), $radfile $(period(radfile))")
+    t = read_period(turbfile, first_day, last_day; n, vars=("lh", "sh", "ts"), lonlim, latlim)
+    r = read_period(radfile, first_day, last_day; n, vars=("sw_dn_sfc", "sw_up_sfc", "lw_dn_sfc", "lw_up_sfc"), lonlim, latlim)
+    t.lon == r.lon && t.lat == r.lat || error("$turbfile and $radfile are on different grids")
+    turb = t.lh .+ t.sh
+    sw = r.sw_dn_sfc .- r.sw_up_sfc
+    lw = r.lw_up_sfc .- r.lw_dn_sfc
+    rad = lw .- sw
+    (; t.lon, t.lat, t.lh, t.sh, turb, sw, lw, rad, Q=turb .+ rad, t.ts, land=isnan.(t.lh), t.dim, t.dimval)
+end
 
 ## BSISO phases (bsiso_phase.jl output: group dimension "phase", active days only)
 
