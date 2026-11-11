@@ -19,7 +19,7 @@ export era5dir, era5code, era5file, month_files, month_blocks, chunk_cache, dail
        dailymean, accumulate!,
        oaflux_files, oaflux_turbulent, oafluxfile, oaflux_mean, oaflux_composite,
        ceres_vars, ceresfiles, ceres_mean, ceres_composite, pmap_groups, composite_data,
-       oisstfile, oisst_sst
+       oisstfile, oisst_sst, script_args
 
 # ERA5 hourly surface analysis from NCAR RDA d633000, one file per variable per month:
 #   <dir>/201201/e5.oper.an.sfc.128_229_iews.ll025sc.2012010100_2012013123.nc
@@ -572,11 +572,12 @@ function ceres_composite(groups; root, vars=keys(ceres_vars))
 end
 
 """
-    composite_data(data, groups; era5root, oafluxroot, ceresroot, oisstroot=nothing)
+    composite_data(data, groups; sst=:oisst, era5root, oafluxroot, ceresroot, oisstroot=nothing)
 
 Composite each group of days of the data set `data`, each in its own run and file:
-`:era5`: ERA5 fields and Ekman terms (`composite`), from era5dir(era5root);
-`:era5oisst`: the same, with daily OISST (from oisstroot) for SST, on the ERA5 grid;
+`:era5`: ERA5 fields and Ekman terms (`composite`), from era5dir(era5root), with the SST
+product `sst`: `:oisst` (default), daily OISST v2.1 from oisstroot on the ERA5 grid, or
+`:e5sst`, ERA5's own SST (Andrea's copy stops in 2020);
 `:oaflux`: all OAFlux fields, with ISCCP radiation and qnet (through 2009);
 `:oafluxturb`: the OAFlux turbulent fields only (through 2022);
 `:ceres`: CERES SYN1deg adjusted all-sky surface and TOA radiative fluxes (from March 2000).
@@ -584,12 +585,16 @@ OAFlux and CERES composites of the same days can be combined after compositing (
 Returns (comp, nobs, lon, lat, units, prefix, title); prefix and title name the data in the
 output file name and title.
 """
-function composite_data(data, groups; era5root, oafluxroot, ceresroot, oisstroot=nothing)
-    if data == :era5
-        (composite(groups; dir=era5dir(era5root))..., units, "ekman", "ERA5 surface fields and Ekman terms")
-    elseif data == :era5oisst
+function composite_data(data, groups; sst=:oisst, era5root, oafluxroot, ceresroot, oisstroot=nothing)
+    if data == :era5 && sst == :oisst
+        isnothing(oisstroot) && error("SST :oisst needs oisstroot, the OISST directory")
         (composite(groups; dir=era5dir(era5root), oisst=oisstroot)..., units,
          "ekman_oisst", "ERA5 surface fields with OISST v2.1 SST, and Ekman terms")
+    elseif data == :era5 && sst == :e5sst
+        (composite(groups; dir=era5dir(era5root))..., units,
+         "ekman_e5sst", "ERA5 surface fields with ERA5 SST, and Ekman terms")
+    elseif data == :era5
+        error("sst must be :oisst or :e5sst, not :$sst")
     elseif data == :oaflux
         (oaflux_composite(groups; root=oafluxroot)..., "oaflux", "OAFlux daily surface fluxes and meteorology")
     elseif data == :oafluxturb
@@ -599,8 +604,35 @@ function composite_data(data, groups; era5root, oafluxroot, ceresroot, oisstroot
         (ceres_composite(groups; root=ceresroot)...,
          "ceres", "CERES SYN1deg daily adjusted all-sky surface and TOA radiative fluxes")
     else
-        error("data must be :era5, :era5oisst, :oaflux, :oafluxturb or :ceres, not :$data")
+        error("data must be :era5, :oaflux, :oafluxturb or :ceres, not :$data")
     end
+end
+
+"""
+    script_args(args=ARGS)
+
+Options of a compositing script from its command-line words, in any order: a data set
+(era5, oaflux, oafluxturb or ceres; default era5), an SST product for era5 (oisst or
+e5sst; default oisst), a first and last year (two integers), and peryear (one file per
+year). Returns (; data, sst, years, peryear); years is nothing unless given.
+"""
+function script_args(args=ARGS)
+    data, sst, yrs, peryear = :era5, :oisst, Int[], false
+    for a in args
+        if a in ("era5", "oaflux", "oafluxturb", "ceres")
+            data = Symbol(a)
+        elseif a in ("oisst", "e5sst")
+            sst = Symbol(a)
+        elseif a == "peryear"
+            peryear = true
+        elseif !isempty(a) && all(isdigit, a)
+            push!(yrs, parse(Int, a))
+        else
+            error("unknown argument \"$a\": expected era5, oaflux, oafluxturb, ceres, oisst, e5sst, peryear or a year")
+        end
+    end
+    length(yrs) in (0, 2) || error("give a first and a last year, or no years")
+    (; data, sst, years=isempty(yrs) ? nothing : yrs[1]:yrs[2], peryear)
 end
 
 # units of the saved fields; M in kg/m/s, so M⋅∇s and s∇⋅M are in kg/m^2/s times the units of s

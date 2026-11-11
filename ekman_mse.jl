@@ -3,8 +3,13 @@ using EkmanCommon
 
 # Pentad (5-day) climatologies of ERA5 surface fields and air-sea Ekman terms for April-July.
 #   script:  julia --project -p 8 ekman_mse.jl    or    sbatch run_slurm.sh ekman_mse.jl
-#            other data (era5oisst, oaflux, oafluxturb, ceres): julia --project -p 8 ekman_mse.jl ceres   or   sbatch run_slurm.sh ekman_mse.jl ceres
-#            years, and one file per year: sbatch run_slurm.sh ekman_mse.jl era5oisst 2023 2025 peryear
+#            followed by any of these words, in any order (see script_args):
+#              data set: era5 (default), oaflux, oafluxturb or ceres
+#              SST product for era5: oisst (default) or e5sst
+#              first and last year, and peryear for one file per year
+#            e.g. sbatch run_slurm.sh ekman_mse.jl e5sst 2012 2020
+#                 sbatch run_slurm.sh ekman_mse.jl 2023 2025 peryear
+#                 sbatch run_slurm.sh ekman_mse.jl ceres
 #   REPL:    include("ekman_mse.jl") defines the functions only; then, for workers,
 #              addprocs(4); @everywhere using EkmanCommon
 #            and e.g. main(years=2012:2012, pentads=19:20)
@@ -22,10 +27,12 @@ oafluxdir = "data/oaflux/daily"
 ceresdir = "data/ceres/adjusted" # symlink to /storage/ceoas-datasets/datasets/ERA5/staging/simon/ceres/adjusted
 # NOAA OISST v2.1 daily SST files (YYYY/oisst-avhrr-v02r01.YYYYMMDD.nc), 1981-present, on the HPC in the repo
 oisstdir = "data/oisst"
-# years of each data set: ERA5 (Andrea's data stop at 2020); all OAFlux variables (radiation
-# and qnet stop at 2009); OAFlux turbulent fields and CERES radiation over the same years, to be
-# combined after compositing (CERES starts in March 2000, OAFlux turbulence stops in 2022)
-default_years = (era5=2012:2020, era5oisst=2012:2020, oaflux=1985:2009, oafluxturb=2000:2022, ceres=2000:2022) # 2000: from April 1 (pentad 19)
+# default years of each data set: ERA5 with OISST SST (t2, d2 extended through 2026) or with
+# ERA5 SST (Andrea's stops at 2020); all OAFlux variables (radiation and qnet stop at 2009);
+# OAFlux turbulent fields and CERES radiation over the same years, to be combined after
+# compositing (CERES starts in March 2000, OAFlux turbulence stops in 2022)
+default_years(data, sst=:oisst) = data == :era5 ? (sst == :e5sst ? (2012:2020) : (2012:2025)) :
+    (oaflux=1985:2009, oafluxturb=2000:2022, ceres=2000:2022)[data]
 
 "pentad (1-73) of date d, on the 365-day calendar (Feb 29 joins pentad 12)"
 pentad(d) = (dayofyear(d) - (isleapyear(d) && month(d) > 2) - 1) ÷ 5 + 1
@@ -44,17 +51,18 @@ pentad_climatology(years, pentads::UnitRange; kw...) =
     composite([[d for y in years for d in pentaddays(y, p:p)] for p in pentads]; kw...)
 
 """
-    main(; data=:era5, years, pentads, ceoasdir, oafluxdir, ceresdir)
+    main(; data=:era5, sst=:oisst, years, pentads, ceoasdir, oafluxdir, ceresdir, oisstdir)
 
-Pentad climatology of the data set `data` (see `composite_data`): save the NetCDF file
-<prefix>_pentad_clim_<first_day>-<last_day>.nc (yyyymmdd) and return (comp, nobs, lon, lat). Pentads default to
-April-July, 19 (Apr 1-5) through 43 (Jul 30-Aug 3); years to `default_years[data]`.
+Pentad climatology of the data set `data` with SST product `sst` (see `composite_data`):
+save the NetCDF file <prefix>_pentad_clim_<first_day>-<last_day>.nc (yyyymmdd) and return
+(comp, nobs, lon, lat). Pentads default to April-July, 19 (Apr 1-5) through 43 (Jul 30-Aug 3);
+years to `default_years(data, sst)`.
 """
-function main(; data=:era5, years=default_years[data], pentads=19:43,
+function main(; data=:era5, sst=:oisst, years=default_years(data, sst), pentads=19:43,
                 ceoasdir=ceoasdir, oafluxdir=oafluxdir, ceresdir=ceresdir, oisstdir=oisstdir)
     groups = [[d for y in years for d in pentaddays(y, p:p)] for p in pentads]
     comp, nobs, lon, lat, units, prefix, title =
-        composite_data(data, groups; era5root=ceoasdir, oafluxroot=oafluxdir, ceresroot=ceresdir,
+        composite_data(data, groups; sst, era5root=ceoasdir, oafluxroot=oafluxdir, ceresroot=ceresdir,
                        oisstroot=oisstdir)
     yrs = "$(first(years))-$(last(years))"
     day0, day1 = minimum(minimum, groups), maximum(maximum, groups) # period of the composite
@@ -76,12 +84,12 @@ if abspath(PROGRAM_FILE) == @__FILE__
         addprocs(SlurmManager(); exeflags="--project=$(Base.active_project())")
     end
     @everywhere using EkmanCommon   # after the workers exist
-    # arguments: data [first_year last_year [peryear]], e.g. ekman_mse.jl era5oisst 2023 2025 peryear
-    data = Symbol(get(ARGS, 1, "era5"))
-    years = length(ARGS) >= 3 ? (parse(Int, ARGS[2]):parse(Int, ARGS[3])) : default_years[data]
-    if get(ARGS, 4, "") == "peryear" # a climatology of each year, each in its own file
-        foreach(y -> main(; data, years=y:y), years)
+    # words in any order: data set, SST product, first and last year, peryear (see script_args)
+    (; data, sst, years, peryear) = script_args(ARGS)
+    years = something(years, default_years(data, sst))
+    if peryear # a climatology of each year, each in its own file
+        foreach(y -> main(; data, sst, years=y:y), years)
     else
-        main(; data, years)
+        main(; data, sst, years)
     end
 end
