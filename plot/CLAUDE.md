@@ -20,6 +20,7 @@ Two libraries, loaded by notebooks with `using Revise; includet(...)`, each in s
 
 ## Notebooks and scripts
 - `ekman_plots.ipynb`: pentad climatology averaged over a period (May set up; June as an example of another period; ASTZ split of the Ekman advection sum with h_* = c_pa SST + Lv q_sat(SST) and h'_a = h_* − h_a; a May-June comparison of ocean Ekman advection with SST contours and wind stress). M, h_a, h_o and their gradients come from the composite means (exact, since these are linear). The advection, s∇⋅M and flux-form terms come from the saved `adv_*`/`sdiv_*` composites of daily products.
+- `ekman_years.ipynb`: May Ekman advection of single years 2023–2025 (per-year files, `composite_file(stem, y:y)`), and their anomalies from the 2012–2025 climatology.
 - `ekman_flux_form.ipynb`: why the advection form is used: in the flux form, h ∇⋅M and −∇⋅(M h) nearly cancel (the flux-form figure), May.
 - `bsiso_plots.ipynb`: BSISO1 phase composites: one phase `p`, and all 8 phases (`fp = ekman_fields(file, 1:8; ...)`, lon x lat x phase).
 - `plot_bsiso_phase.jl` plots the phases in `BSISO_phase.txt`.
