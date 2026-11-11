@@ -51,6 +51,28 @@ function read_group(file, k; vars=composite_vars, lonlim=nothing, latlim=nothing
     end
 end
 
+"""
+    composite_file(stem, years; dir="../out")
+
+Path of the composite file in `dir` named <stem>_<first>-<last>.nc whose period runs from
+year first(years) to year last(years), e.g. composite_file("ekman_pentad_clim_oisst", 2012:2025)
+for the climatology over 2012-2025, or composite_file("ekman_pentad_clim_oisst", 2023:2023)
+for the single year 2023. The stem is <data>_<grouping>_<sst> (no <sst> for data sets
+without one); first and last are dates, yyyymmdd, or years, yyyy. Errors unless exactly one
+file matches.
+"""
+function composite_file(stem, years; dir="../out")
+    fs = filter(readdir(dir)) do f
+        startswith(f, stem * "_") || return false
+        # the period after the stem: yyyy[mmdd]-yyyy[mmdd].nc
+        m = match(r"^(\d{4})(?:\d{4})?-(\d{4})(?:\d{4})?\.nc$", f[ncodeunits(stem)+2:end])
+        !isnothing(m) && parse(Int, m[1]) == first(years) && parse(Int, m[2]) == last(years)
+    end
+    length(fs) == 1 ||
+        error("$(length(fs)) files $(stem)_<first>-<last>.nc in $dir for years $(first(years))-$(last(years)): $fs")
+    joinpath(dir, only(fs))
+end
+
 "name and values of the group dimension of a composite file, e.g. (\"phase\", [1, ..., 8])"
 group_values(file) = NCDataset(file) do ds
     dim = last(dimnames(ds["taux"]))

@@ -25,6 +25,8 @@ oafluxdir = "data/oaflux/daily"
 ceresdir = "data/ceres/adjusted" # symlink to /storage/ceoas-datasets/datasets/ERA5/staging/simon/ceres/adjusted
 # NOAA OISST v2.1 daily SST files (YYYY/oisst-avhrr-v02r01.YYYYMMDD.nc), 1981-present, on the HPC in the repo
 oisstdir = "data/oisst"
+# composite NetCDF files are written here
+outdir = "out"
 # default days of each data set: ERA5 with OISST SST (t2, d2 extended through 2026) or with
 # ERA5 SST (Andrea's stops at 2020); all OAFlux variables (radiation and qnet stop at 2009);
 # OAFlux turbulent fields and CERES radiation over the same days, to be combined after
@@ -83,8 +85,9 @@ function main(; data=:era5, sst=:oisst, days=default_days(data, sst), ampmin=1.0
         composite_data(data, phase_days(phaselookup, days); sst,
                        era5root=ceoasdir, oafluxroot=oafluxdir, ceresroot=ceresdir, oisstroot=oisstdir)
     ymd(d) = Dates.format(d, "yyyymmdd")
+    mkpath(outdir)
     sstpart = isempty(sstname) ? "" : "$(sstname)_"
-    save_composite("$(prefix)_bsiso1_phase_$(sstpart)$(ymd(first(days)))-$(ymd(last(days))).nc",
+    save_composite(joinpath(outdir, "$(prefix)_bsiso1_phase_$(sstpart)$(ymd(first(days)))-$(ymd(last(days))).nc"),
                    comp, nobs, lon, lat, "phase", 1:8;
                    dimattrib=["long_name" => "BSISO1 phase"], fieldunits=units,
                    attrib=["title" => "$title: composites by BSISO1 phase",

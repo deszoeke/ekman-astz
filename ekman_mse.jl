@@ -27,6 +27,8 @@ oafluxdir = "data/oaflux/daily"
 ceresdir = "data/ceres/adjusted" # symlink to /storage/ceoas-datasets/datasets/ERA5/staging/simon/ceres/adjusted
 # NOAA OISST v2.1 daily SST files (YYYY/oisst-avhrr-v02r01.YYYYMMDD.nc), 1981-present, on the HPC in the repo
 oisstdir = "data/oisst"
+# composite NetCDF files are written here
+outdir = "out"
 # default years of each data set: ERA5 with OISST SST (t2, d2 extended through 2026) or with
 # ERA5 SST (Andrea's stops at 2020); all OAFlux variables (radiation and qnet stop at 2009);
 # OAFlux turbulent fields and CERES radiation over the same years, to be combined after
@@ -68,8 +70,9 @@ function main(; data=:era5, sst=:oisst, years=default_years(data, sst), pentads=
     yrs = "$(first(years))-$(last(years))"
     day0, day1 = minimum(minimum, groups), maximum(maximum, groups) # period of the composite
     ymd(d) = Dates.format(d, "yyyymmdd")
+    mkpath(outdir)
     sstpart = isempty(sstname) ? "" : "$(sstname)_"
-    save_composite("$(prefix)_pentad_clim_$(sstpart)$(ymd(day0))-$(ymd(day1)).nc", comp, nobs, lon, lat, "pentad", pentads;
+    save_composite(joinpath(outdir, "$(prefix)_pentad_clim_$(sstpart)$(ymd(day0))-$(ymd(day1)).nc"), comp, nobs, lon, lat, "pentad", pentads;
                    dimattrib=["long_name" => "pentad of year (1-73), 365-day calendar, Feb 29 in pentad 12"],
                    fieldunits=units,
                    attrib=["title" => "$title: pentad climatology", "years" => yrs,
