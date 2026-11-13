@@ -26,6 +26,7 @@ super/subscripts) in the same font; the few symbols it lacks, e.g. ∇, come fro
 bundled with matplotlib. Fonts not in the list are never requested: a missing font can make
 matplotlib search all of the system's fonts, which hangs for minutes on the HPC.
 `dpi` sets the size of inline figures on screen (figsize in inches times dpi, in pixels).
+Legends have no frame (legend.frameon = false; pass frameon=true to a legend for one).
 Returns the fonts used.
 """
 function plot_defaults!(; fonts=["Liberation Sans", "Nimbus Sans", "Arial", "Helvetica", "Verdana"], dpi=100)
@@ -40,6 +41,7 @@ function plot_defaults!(; fonts=["Liberation Sans", "Nimbus Sans", "Arial", "Hel
         rc["mathtext.fallback"] = "stixsans"
     end
     rc["figure.dpi"] = dpi
+    rc["legend.frameon"] = false # legends without a box
     isempty(use) ? ["DejaVu Sans (default)"] : use
 end
 plot_defaults!()
@@ -57,6 +59,7 @@ const grad_units = raw"J kg$^{-1}$ km$^{-1}$"
 const advT_units = raw"K kg m$^{-2}$ s$^{-1}$"
 const tau_units  = raw"N m$^{-2}$"
 const M_units    = raw"kg m$^{-1}$ s$^{-1}$"
+const w_units    = raw"m day$^{-1}$"
 const h_units    = raw"kJ kg$^{-1}$"
 
 "x with NaN where land is true"
@@ -193,14 +196,15 @@ end
 # The figures themselves are written in the notebooks, as plot_panels(f, [panel(...), ...]).
 
 """
-    stress_arrows(f; scale=0.25, key=0.1, kw...)
+    stress_arrows(f; scale=0.25, key=0.1, width=0.003, kw...)
 
 Wind stress `arrows` of f.taux, f.tauy on f's grid (so they can go on a map of another grid,
 e.g. the 1° fluxes): `scale` N m^-2 per inch (smaller is longer), and a key arrow of `key`
-N m^-2, labelled. `kw` go to `arrows`, e.g. `keypos=(0.9, 0.85)`, `every=8`.
+N m^-2, labelled. `width` is the shaft width (fraction of the axes width; thin). `kw` go to
+`arrows`, e.g. `keypos=(0.9, 0.85)`, `every=8`.
 """
-stress_arrows(f; scale=0.25, key=0.1, kw...) =
-    arrows(f.taux, f.tauy; grid=(; f.lon, f.lat, f.land), scale, key, keylabel="$key " * tau_units, kw...)
+stress_arrows(f; scale=0.25, key=0.1, width=0.003, kw...) =
+    arrows(f.taux, f.tauy; grid=(; f.lon, f.lat, f.land), scale, key, keylabel="$key " * tau_units, width, kw...)
 
 """
     sst_contours(f; levels=24:0.5:31, colors="0.25", kw...)

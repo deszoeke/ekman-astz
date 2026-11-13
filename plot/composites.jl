@@ -1,6 +1,6 @@
 # Composites: reading the composite NetCDF files written by save_composite and computing the
 # fields to plot. No plotting here (that is maps.jl). Sections, from general to specific:
-#   General: any composite file   read_group, group_index, read_mean, group_days, anom, ekman_fields
+#   General: any composite file   read_group, group_index, read_mean, group_days, anom, box_mean, ekman_fields
 #   Pentad climatology            (ekman_mse.jl output) pentads for a period of dates
 #   BSISO phases                  (bsiso_phase.jl output) phases
 # The pentad and BSISO sections use only the general section, not each other.
@@ -23,7 +23,7 @@
 # Notebooks load it with Revise, so edits take effect without restarting the kernel:
 #   using Revise; includet("composites.jl")
 using NCDatasets, Dates, Statistics
-using EkmanCommon: c_pa, c_po, Lv, qsat_dew, curtail, ekman_transport_xy, gradient, divergence
+using EkmanCommon: c_pa, c_po, rho_o, Lv, qsat_dew, curtail, ekman_transport_xy, gradient, divergence
 
 ## General: any composite file (group dimension: pentad or phase)
 
@@ -123,6 +123,25 @@ group_days(file, k; lonlim=nothing, latlim=nothing) =
 "anomaly of x from its mean over dimension `dims` (e.g. phase minus the 8-phase mean)"
 anom(x; dims=3) = x .- mean(x; dims)
 
+"""
+    box_mean(x, lon, lat, lonlim, latlim; land=nothing)
+
+Area-weighted (cos latitude) mean of x (lon x lat, or lon x lat x group) over the box
+`lonlim`, `latlim` (degrees), over the points where x is finite and `land` (lon x lat) is
+false: a number for lon x lat x, else a vector over the groups (a time series of pentads).
+"""
+function box_mean(x, lon, lat, lonlim, latlim; land=nothing)
+    i = findall(v -> lonlim[1] <= v <= lonlim[2], lon)
+    j = findall(v -> latlim[1] <= v <= latlim[2], lat)
+    w = cosd.(lat[j])' # 1 x lat
+    ocean = isnothing(land) ? trues(length(i), length(j)) : .!land[i, j]
+    m = map(eachslice(view(x, i, j, :); dims=3)) do xs
+        ok = isfinite.(xs) .& ocean
+        sum(ifelse.(ok, w .* xs, 0.0)) / sum(ifelse.(ok, w, 0.0))
+    end
+    ndims(x) == 2 ? only(m) : m
+end
+
 "dq_sat/dT (kg/kg/K) at T (K): centered difference of the Buck saturation humidity qsat_dew, as used for q"
 dqsat_dT(T; dT=0.01) = (qsat_dew(T + dT) - qsat_dew(T - dT)) / 2dT
 
@@ -132,7 +151,8 @@ dqsat_dT(T; dT=0.01) = (qsat_dew(T + dT) - qsat_dew(T - dT)) / 2dT
 Fields to plot from composites `d` (`read_group`, `read_mean`, `read_period`, `read_phase`),
 with the Ekman transport curtailed within ~`Ro_rad` (m) of the equator by
 r = curtail(lat, Ro_rad), as a NamedTuple (lon x lat arrays, or lon x lat x group when d is):
-SST sst, 2 m air temperature t2 (K), specific humidity q (kg/kg); wind stress taux, tauy (N/m^2, not curtailed); Mx, My (kg/m/s); h_a, h_o (J/kg); their
+SST sst, 2 m air temperature t2 (K), specific humidity q (kg/kg); wind stress taux, tauy (N/m^2, not curtailed); Mx, My (kg/m/s); their divergence divM
+(kg/m^2/s) and Ekman pumping w_ek = divM/rho_o = curl(r τ/f)/rho_o (m/s, upward > 0); h_a, h_o (J/kg); their
 gradients dhodx, dhody, dhadx, dhady (J/kg/m); Ekman advection of temperature advT_o (SST),
 advT_a (t2) in K kg/m^2/s, and, in W/m^2, Ekman advection adv_o, adv_a, s times transport
 divergence sdiv_o, sdiv_a, and flux-form tendency flux_o, flux_a; for the air-sea transition
@@ -146,6 +166,9 @@ function ekman_fields(d; Ro_rad)
     r  = curtail.(d.lat', Ro_rad)
     rx(x) = @. ifelse(r == 0, 0.0, r*x) # r x; 0 at the equator, where uncurtailed M is Inf
     Mx, My = ekman_transport_xy(d.taux, d.tauy, d.lat; Ro_rad)
+    # Ekman pumping: ∇⋅M = curl(r τ/f), exact from the composite-mean stress (M is linear in τ)
+    divM = divergence(Mx, My, d.lon, d.lat) # kg/m^2/s
+    w_ek = divM ./ rho_o                     # m/s, upward > 0
     h_a = @. c_pa*d.t2 + Lv*d.q # J/kg, T in K
     h_o = @. c_po*d.sst         # J/kg, SST in K
     # gradients of the composite means
@@ -170,7 +193,7 @@ function ekman_fields(d; Ro_rad)
     adv_star = rx(@. (c_pa + Lv*dqsat_dT(d.sst)) * d.adv_sst) # -M_o⋅∇h_*
     adv_ha_prime = adv_star + adv_a # -M_o⋅∇h'_a = -M_o⋅∇h_* + M_o⋅∇h_a (M_a = -M_o), the remainder of the ASTZ sum
     land = isnan.(selectdim(d.sst, 3, 1)) # lon x lat for 2-D and 3-D d
-    (; d.lon, d.lat, d.sst, d.t2, d.q, d.taux, d.tauy, Mx, My, h_a, h_o, dhodx, dhody, dhadx, dhady,
+    (; d.lon, d.lat, d.sst, d.t2, d.q, d.taux, d.tauy, Mx, My, divM, w_ek, h_a, h_o, dhodx, dhody, dhadx, dhady,
        advT_o, advT_a, adv_o, adv_a, sdiv_o, sdiv_a, flux_o, flux_a,
        h_star, ha_prime, adv_star, adv_ha_prime, r, land, d.dim, d.dimval)
 end

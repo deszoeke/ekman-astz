@@ -14,7 +14,7 @@ using NCDatasets
 using PrecompileTools
 
 export era5dir, era5code, era5file, month_files, month_blocks, chunk_cache, daily_terms, composite_mean, composite, save_composite,
-       fieldkeys, nlkeys, keys_all, scalars, c_pa, c_po, Lv, esat_buck, qsat_dew,
+       fieldkeys, nlkeys, keys_all, scalars, c_pa, c_po, rho_o, Lv, esat_buck, qsat_dew,
        coriolis, curtail, ekman_transport, ekman_transport_xy, gradient, divergence, advection,
        dailymean, accumulate!,
        oaflux_files, oaflux_turbulent, oafluxfile, oaflux_mean, oaflux_composite,
@@ -111,6 +111,7 @@ end
 # thermodynamic constants
 const c_pa = 1004.6  # J/kg/K specific heat of dry air at constant pressure
 const c_po = 3985.0  # J/kg/K specific heat of seawater
+const rho_o = 1025.0 # kg/m^3 reference density of seawater
 const Lv   = 2.501e6 # J/kg latent heat of vaporization
 const Rd   = 287.04  # J/kg/K
 const Rv   = 461.5   # J/kg/K
